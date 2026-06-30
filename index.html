@@ -1177,17 +1177,36 @@ function applySpeed(v) {
 let _voiceMale   = null;
 let _voiceFemale = null;
 
+const FEMALE_VOICE_KEYWORDS = ['female','woman','zira','samantha','victoria','karen','moira','tessa','fiona','veena','susan','allison','ava','alice','amelie','jenny','aria','michelle','emma','olivia','salli','joanna','kendra','kimberly','google uk english female'];
+const MALE_VOICE_KEYWORDS   = ['male','man','daniel','alex','thomas','david','rishi','lee','bruce','diego','jorge','luca','guy','ryan','mark','matthew','justin','joey','eric','brian','google uk english male'];
+
+// 性別に最も合う音声を選ぶ。明示的にラベル付けされた音声が端末側に無い場合でも、
+// 同じ声に両方の先生がまとまってしまわないよう、利用可能な音声リスト内で
+// 男性/女性で別々の候補を割り当てる。
+function pickVoiceForGender(gender, lang) {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  const langPrefix = (lang || 'en').slice(0, 2).toLowerCase();
+  const langVoices = voices.filter(v => v.lang.toLowerCase().startsWith(langPrefix));
+  const pool = langVoices.length ? langVoices : voices;
+  const keywords = gender === 'female' ? FEMALE_VOICE_KEYWORDS : MALE_VOICE_KEYWORDS;
+
+  let best = pool.find(v => keywords.some(k => v.name.toLowerCase().includes(k)));
+  if (best) return best;
+
+  // ラベルだけでは判別できない場合のフォールバック：
+  // 候補が複数あるなら先頭/末尾で分け、最低限「違う声」になるようにする
+  if (pool.length > 1) {
+    return gender === 'female' ? pool[0] : pool[pool.length - 1];
+  }
+  return pool[0];
+}
+
 function cacheVoices() {
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return false;
-  const femKw = ['samantha','zira','victoria','karen','moira','tessa','susan','ava','alice','fiona'];
-  const malKw = ['daniel','alex','david','thomas','rishi','lee','bruce','jorge'];
-  _voiceFemale = voices.find(v => v.lang.startsWith('en') && femKw.some(k => v.name.toLowerCase().includes(k)))
-              || voices.find(v => v.lang === 'en-US' && v.name.toLowerCase().includes('female'))
-              || voices.find(v => v.lang.startsWith('en'));
-  _voiceMale   = voices.find(v => v.lang.startsWith('en') && malKw.some(k => v.name.toLowerCase().includes(k)))
-              || voices.find(v => v.lang === 'en-US' && !v.name.toLowerCase().includes('female'))
-              || voices.find(v => v.lang.startsWith('en'));
+  _voiceFemale = pickVoiceForGender('female', 'en-US');
+  _voiceMale   = pickVoiceForGender('male', 'en-US');
   return true;
 }
 // voices はブラウザ起動後に非同期ロードされる
@@ -1199,31 +1218,14 @@ function speakText(text) {
   window.speechSynthesis.cancel();
   const utt  = new SpeechSynthesisUtterance(text);
   const char = selectedChar || {};
+  const gender = char.voiceGender || 'male';
   utt.lang   = char.voiceLang   || 'en-US';
   utt.rate   = getSpeed();
-  utt.pitch  = char.voiceGender === 'female' ? 1.1 : 0.95;
+  // 同一音声しか無い端末でも男女差が分かるよう、ピッチの差を大きめに取る
+  utt.pitch  = gender === 'female' ? 1.25 : 0.75;
 
-  // 利用可能な音声から最適な声を選択
-  const voices = window.speechSynthesis.getVoices();
-  if (voices.length > 0) {
-    const lang   = utt.lang;
-    const gender = char.voiceGender || 'male';
-    // 性別キーワードで絞り込み
-    const femaleKeywords = ['female','woman','zira','samantha','victoria','karen','moira','tessa','fiona','veena','susan','allison','ava','alice','amelie'];
-    const maleKeywords   = ['male','man','daniel','alex','thomas','david','rishi','lee','bruce','diego','jorge','luca'];
-    const keywords = gender === 'female' ? femaleKeywords : maleKeywords;
-
-    // 言語一致 + 性別キーワード一致を優先
-    let best = voices.find(v =>
-      v.lang.startsWith(lang.slice(0,2)) &&
-      keywords.some(k => v.name.toLowerCase().includes(k))
-    );
-    // 言語一致のみ（性別不問）
-    if (!best) best = voices.find(v => v.lang.startsWith(lang.slice(0,2)));
-    // en-US フォールバック
-    if (!best) best = voices.find(v => v.lang === 'en-US');
-    if (best) utt.voice = best;
-  }
+  const best = pickVoiceForGender(gender, utt.lang);
+  if (best) utt.voice = best;
 
   window.speechSynthesis.speak(utt);
 }
@@ -1292,6 +1294,16 @@ function selectChar(id) {
 
 function startCall() {
   if (!selectedChar) return;
+  var apiKey = LS.get(K.API_KEY);
+  if (!apiKey) {
+    alert('Gemini APIキーが設定されていません。\n次の画面でAPIキーを入力し、保存してから通話を始めてください。');
+    openSettingsModal();
+    setTimeout(function () {
+      var keyEl = document.getElementById('set-api-key');
+      if (keyEl) keyEl.focus();
+    }, 150);
+    return;
+  }
   document.getElementById('char-select-overlay').style.display = 'none';
   document.getElementById('call-badge').style.display = '';
   callStarted = true;
