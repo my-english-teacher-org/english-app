@@ -439,10 +439,6 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
           <span class="ctrl-label">終話</span>
         </div>
         <div class="ctrl-item">
-          <button class="ctrl-btn on" id="btn-visual" onclick="toggleVisual()"><span id="visual-icon-wrap"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span></button>
-          <span class="ctrl-label">ビジュアル</span>
-        </div>
-        <div class="ctrl-item">
           <button class="ctrl-btn on" id="btn-caption" onclick="cycleCaption()"><span id="caption-icon-wrap"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span></button>
           <span class="ctrl-label" id="caption-label">EN字幕</span>
         </div>
@@ -563,29 +559,47 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 <div class="modal-overlay" id="modal-help" onclick="if(event.target===this) closeHelpModal()">
   <div class="modal">
     <div class="modal-title"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 8a3.5 3 0 0 1 3.5 -3h1a3.5 3 0 0 1 3.5 3a3 3 0 0 1 -2 3a3 4 0 0 0 -2 4" /><path d="M12 19l0 .01" /></svg> 操作ガイド<button onclick="closeHelpModal()" style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button></div>
-    <div class="help-item">
-      <div class="help-icon">🎤</div>
-      <div><div class="help-name">マイク</div><div class="help-desc">音声入力のON/OFF。ONにすると話しかけた英語を先生が聞き取ります。</div></div>
+
+    <div id="help-content-menu">
+      <div class="help-item">
+        <div class="help-icon">☰</div>
+        <div><div class="help-name">メニュー(左上)</div><div class="help-desc">タップすると「通話・プロファイル・設定」のメニューが開きます。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">📞</div>
+        <div><div class="help-name">通話</div><div class="help-desc">先生(Claude / Claudia)を選んで英会話を始める、このアプリのメイン画面です。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">🙋</div>
+        <div><div class="help-name">プロファイル</div><div class="help-desc">名前・職業・趣味・目標・苦手なことなど、あなたについての情報です。会話しながら自動で追加されていくので、最初から全部埋める必要はありません。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">⚙️</div>
+        <div><div class="help-name">設定</div><div class="help-desc">Gemini APIキーの登録、無料/有料Tierの切り替え、利用モデル、読み上げ速度などを設定します。</div></div>
+      </div>
     </div>
-    <div class="help-item">
-      <div class="help-icon">🔊</div>
-      <div><div class="help-name">AI音声(映像右上)</div><div class="help-desc">先生の声を読み上げるかどうかの切り替えです。電車の中など声を出したくない時はOFFに。</div></div>
-    </div>
-    <div class="help-item">
-      <div class="help-icon">🖼️</div>
-      <div><div class="help-name">ビジュアル</div><div class="help-desc">画面上部に出る、会話のテーマを表す絵文字カードの表示ON/OFFです。なくても会話自体には影響しません。</div></div>
-    </div>
-    <div class="help-item">
-      <div class="help-icon">💬</div>
-      <div><div class="help-name">EN / JP字幕</div><div class="help-desc">右側の字幕パネルに、英語の字幕・日本語訳をそれぞれ表示するかどうかの切り替えです。</div></div>
-    </div>
-    <div class="help-item">
-      <div class="help-icon">📞</div>
-      <div><div class="help-name">終話</div><div class="help-desc">通話を終了します。終了時の内容は、次回の会話に少しだけ引き継がれます。</div></div>
-    </div>
-    <div class="help-item">
-      <div class="help-icon">☰</div>
-      <div><div class="help-name">メニュー(左上)</div><div class="help-desc">プロファイルの確認・編集や、APIキーなどの設定はここから開きます。</div></div>
+
+    <div id="help-content-call" style="display:none">
+      <div class="help-item">
+        <div class="help-icon">🎤</div>
+        <div><div class="help-name">マイク</div><div class="help-desc">音声入力のON/OFF。ONにすると話しかけた英語を先生が聞き取ります。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">🔊</div>
+        <div><div class="help-name">AI音声(映像右上)</div><div class="help-desc">先生の声を読み上げるかどうかの切り替えです。電車の中など声を出したくない時はOFFに。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">💬</div>
+        <div><div class="help-name">EN / JP字幕</div><div class="help-desc">右側の字幕パネルに、英語の字幕・日本語訳をそれぞれ表示するかどうかの切り替えです。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">💡</div>
+        <div><div class="help-name">入力欄上のチップ</div><div class="help-desc">先生の発言に対する返事の例文です。タップすると入力欄にそのまま入ります。</div></div>
+      </div>
+      <div class="help-item">
+        <div class="help-icon">📞</div>
+        <div><div class="help-name">終話</div><div class="help-desc">通話を終了します。終了時の内容は、次回の会話に少しだけ引き継がれます。</div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -757,6 +771,9 @@ function closeNavMenu() {
   document.getElementById('nav-menu-overlay').classList.remove('open');
 }
 function openHelpModal() {
+  var inCall = !!callStarted;
+  document.getElementById('help-content-menu').style.display = inCall ? 'none' : '';
+  document.getElementById('help-content-call').style.display = inCall ? '' : 'none';
   document.getElementById('modal-help').classList.add('open');
 }
 function closeHelpModal() {
@@ -1301,9 +1318,10 @@ ${elicitBlock}${memoryBlock}
 - Use emoji for visual communication when helpful.
 - If learner asks to speak slower/faster, include speedAdjust.
 - Keep every field SHORT. Do not pad your answer — brevity makes you respond faster, which matters a lot for a live voice conversation.
+- "hints" must be 3 short example REPLIES the learner could say right now to answer the question you just asked them — not topics, not your own words repeated. They are shown as tap-to-fill suggestion chips, so they must make sense as something the learner says back to you.
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
-{"english":"2-3 short sentences","japanese":"日本語訳","visual":{"type":"emoji|none","emoji":"絵文字","title":"ラベル(3-6文字)","desc":"説明(10-15文字程度)"},"speedAdjust":0,"hints":["hint1","hint2","hint3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
+{"english":"2-3 short sentences","japanese":"日本語訳","visual":{"type":"emoji|none","emoji":"絵文字","title":"ラベル(3-6文字)","desc":"説明(10-15文字程度)"},"speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
 }
 
 
@@ -1382,7 +1400,7 @@ function speakText(text) {
 
 // ── マイク ──
 
-var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = true;
+var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = false;
 var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var isLoading = false, callStarted = false;
@@ -1408,7 +1426,9 @@ function resetReplyTimer() {
 }
 function startReplyTimer() {
   resetReplyTimer(); _waitingReply = true;
-  _replyTimer = setTimeout(function() { if (callStarted && !isLoading && _waitingReply) teacherProactiveMessage(); }, REPLY_WAIT_MS);
+  // ★ マイクがミュート解除(ON)の間だけ、無発話タイマーで先生から話しかけさせる。
+  //   ミュート中はユーザーが意図的に黙っている可能性が高いため発動しない。
+  _replyTimer = setTimeout(function() { if (callStarted && !isLoading && _waitingReply && !micMuted) teacherProactiveMessage(); }, REPLY_WAIT_MS);
 }
 
 function initCallScreen() {
@@ -1843,14 +1863,7 @@ function showVisualAssist(v) {
   document.getElementById('visual-desc').textContent  = v.desc  || '';
   el.classList.add('show'); setTimeout(function() { el.classList.remove('show'); }, 6000);
 }
-function toggleVisual() {
-  visualEnabled = !visualEnabled;
-  var btn = document.getElementById('btn-visual');
-  var wrp = document.getElementById('visual-icon-wrap');
-  btn.classList.toggle('on', visualEnabled);
-  if (wrp) wrp.innerHTML = visualEnabled ? SVG_VIS_ON : SVG_VIS_OFF;
-  if (!visualEnabled) document.getElementById('visual-assist').classList.remove('show');
-}
+
 function toggleVolume() {
   voiceEnabled = !voiceEnabled;
   var btn = document.getElementById('btn-volume');
