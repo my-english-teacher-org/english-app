@@ -1425,19 +1425,25 @@ function endCall() {
   LS.set(K.SESSION_COUNT, (LS.get(K.SESSION_COUNT) || 0) + 1);
 }
 
-async function sendMessage(retryCount) {
-  retryCount = retryCount || 0;
+async function sendMessage() {
   var inp  = document.getElementById('chat-input');
   var text = inp.value.trim();
   if (!text || isLoading || !callStarted) return;
   inp.value = ''; autoResize(inp);
+  // ★ ユーザーの発言の表示とchatHistoryへの追加は、ここで1回だけ行う。
+  //   以前はリトライのたびにこの関数全体を呼び直していたため、
+  //   再試行のたびに同じ発言が吹き出しとして重複表示されてしまっていた。
   addCaption('me', text, null, null); resetReplyTimer();
+  chatHistory.push({role:'user', parts:[{text:text}]});
+  await callGeminiForChat(0);
+}
+
+async function callGeminiForChat(retryCount) {
   isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
   var apiKey = LS.get(K.API_KEY);
   var model  = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
   var profile = LS.get(K.PROFILE) || {};
   var level   = LS.get(K.LEVEL)   || 'college';
-  chatHistory.push({role:'user', parts:[{text:text}]});
   try {
     var body = {
       system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level)}]},
@@ -1449,16 +1455,18 @@ async function sendMessage(retryCount) {
     removeTypingFromCaption();
     if (!res.ok) {
       var errData = await res.json().catch(function() { return {}; });
-      if (res.status === 429 && (LS.get(K.TIER) || 'paid') === 'free') {
+      // レート制限(429・無料Tierのみ)は最大6回(計30秒)まで自動リトライする。
+      // ユーザーの発言を再表示したりchatHistoryに積み直したりはしない。
+      if (res.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
         addCaption('ai', 'Oh! Rate limit. Retrying in 5 seconds...', '5秒後に自動リトライします。', null);
-        setTimeout(function() { chatHistory.pop(); inp.value = text; isLoading = false; document.getElementById('send-btn').disabled = false; sendMessage(); }, 5000);
+        setTimeout(function() { isLoading = false; document.getElementById('send-btn').disabled = false; callGeminiForChat(retryCount + 1); }, 5000);
         return;
       }
       // Geminiサーバー側の一時的な過負荷(503)・内部エラー(500)・タイムアウト(504)は
       // こちら側のバグではないため、数秒待って自動的に再送する（最大2回まで）。
       if ((res.status === 500 || res.status === 503 || res.status === 504) && retryCount < 2) {
         addCaption('ai', 'Oh! Server busy, retrying in 3 seconds...', 'サーバー混雑中のため3秒後に自動リトライします。', null);
-        setTimeout(function() { chatHistory.pop(); inp.value = text; isLoading = false; document.getElementById('send-btn').disabled = false; sendMessage(retryCount + 1); }, 3000);
+        setTimeout(function() { isLoading = false; document.getElementById('send-btn').disabled = false; callGeminiForChat(retryCount + 1); }, 3000);
         return;
       }
       throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status + (res.status===429?' RESOURCE_EXHAUSTED':'')));
