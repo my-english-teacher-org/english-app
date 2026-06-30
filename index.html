@@ -1605,11 +1605,15 @@ function initSpeechRecognition() {
   recognition.onend = function() {
     micActive = false; document.getElementById('mic-indicator').classList.remove('show');
     console.log('[mic] onend @', new Date().toLocaleTimeString(), 'callStarted:', callStarted, 'micMuted:', micMuted);
-    // continuous=true でも、長い無音やネットワーク要因でブラウザ側が自発的に
-    // セッションを終了させることがあるため、安全網として再startは残しておく。
+    // ★ onend直後に同期でrecognition.start()すると、ブラウザが前回セッションの
+    //   マイクデバイス解放を終えておらず「start→即end」のループに陥ることがある
+    //   （Chromeの既知の癖）。わずかに間を空けてから再startすることでこれを回避する。
     if (callStarted && !micMuted) {
-      try { recognition.start(); console.log('[mic] restart issued'); }
-      catch(e) { console.log('[mic] restart FAILED:', e.name, e.message); }
+      setTimeout(function() {
+        if (!callStarted || micMuted || micActive) return;
+        try { recognition.start(); console.log('[mic] restart issued (delayed)'); }
+        catch(e) { console.log('[mic] restart FAILED:', e.name, e.message); }
+      }, 300);
     }
   };
   recognition.onerror = function(e) {
