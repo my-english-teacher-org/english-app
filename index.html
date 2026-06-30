@@ -1351,7 +1351,8 @@ function endCall() {
   LS.set(K.SESSION_COUNT, (LS.get(K.SESSION_COUNT) || 0) + 1);
 }
 
-async function sendMessage() {
+async function sendMessage(retryCount) {
+  retryCount = retryCount || 0;
   var inp  = document.getElementById('chat-input');
   var text = inp.value.trim();
   if (!text || isLoading || !callStarted) return;
@@ -1377,6 +1378,13 @@ async function sendMessage() {
       if (res.status === 429 && (LS.get(K.TIER) || 'paid') === 'free') {
         addCaption('ai', 'Oh! Rate limit. Retrying in 5 seconds...', '5秒後に自動リトライします。', null);
         setTimeout(function() { chatHistory.pop(); inp.value = text; isLoading = false; document.getElementById('send-btn').disabled = false; sendMessage(); }, 5000);
+        return;
+      }
+      // Geminiサーバー側の一時的な過負荷(503)・内部エラー(500)・タイムアウト(504)は
+      // こちら側のバグではないため、数秒待って自動的に再送する（最大2回まで）。
+      if ((res.status === 500 || res.status === 503 || res.status === 504) && retryCount < 2) {
+        addCaption('ai', 'Oh! Server busy, retrying in 3 seconds...', 'サーバー混雑中のため3秒後に自動リトライします。', null);
+        setTimeout(function() { chatHistory.pop(); inp.value = text; isLoading = false; document.getElementById('send-btn').disabled = false; sendMessage(retryCount + 1); }, 3000);
         return;
       }
       throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status + (res.status===429?' RESOURCE_EXHAUSTED':'')));
