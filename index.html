@@ -1,0 +1,1667 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>English AI Teacher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.x/tabler-icons.min.css">
+<style>
+:root{
+  --navy:#0B1F3A;--navy2:#132844;
+  --teal:#0F9E7D;--teal2:#12B890;
+  --amber:#F59E0B;--coral:#EF4444;
+  --text:#E8F0FB;--text2:#94B4D4;--text3:#5B7FA8;
+  --surface1:#162C4A;--surface2:#1C3558;--surface3:#243F68;
+  --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.14);
+  --radius:12px;--radius-sm:8px;
+  --font-d:"Space Grotesk",sans-serif;--font-b:"Inter",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-height:100vh;overflow-x:hidden}
+.screen{display:none;min-height:100vh;flex-direction:column}
+.screen.active{display:flex}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--navy2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.topbar-brand{display:flex;align-items:center;gap:10px}
+.topbar-logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--teal),var(--teal2));display:flex;align-items:center;justify-content:center;font-family:var(--font-d);font-weight:700;font-size:12px;color:#fff}
+.topbar-title{font-family:var(--font-d);font-size:14px;font-weight:600}
+.cost-badge{font-size:11px;color:var(--text2);background:var(--surface2);border:1px solid var(--border2);border-radius:20px;padding:4px 10px}
+.cost-badge span{color:var(--teal2);font-weight:500}
+.nav{display:flex;gap:2px;padding:6px 12px;background:var(--navy2);border-bottom:1px solid var(--border)}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border:none;background:none;border-radius:var(--radius-sm);font-size:10px;color:var(--text3);cursor:pointer;font-family:var(--font-b);transition:all .15s}
+.nav-btn i{font-size:18px}
+.nav-btn.active{background:var(--surface2);color:var(--teal2)}
+.nav-btn:hover:not(.active){color:var(--text2)}
+.body{flex:1;overflow-y:auto;padding:16px}
+.section-label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+.card{background:var(--surface1);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+.form-group{margin-bottom:14px}
+.form-label{font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:5px}
+.form-label .req{color:var(--coral);margin-left:2px}
+.form-input{width:100%;padding:9px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:var(--font-b);outline:none;transition:border-color .15s}
+.form-input:focus{border-color:var(--teal)}
+.form-input::placeholder{color:var(--text3)}
+.input-wrap{position:relative}
+.input-wrap .form-input{padding-right:38px}
+.input-eye{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text3);cursor:pointer;padding:4px;font-size:16px}
+.form-select{width:100%;padding:9px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:var(--font-b);outline:none;cursor:pointer;appearance:none}
+.form-select option{background:var(--navy2)}
+.form-err{font-size:11px;color:var(--coral);margin-top:4px;display:none}
+.form-err.visible{display:block}
+.hint-text{font-size:11px;color:var(--text3);margin-top:4px}
+.hint-text a{color:var(--teal2);text-decoration:none}
+.form-radio-group{display:flex;gap:8px}
+.form-radio{flex:1;border:1px solid var(--border2);border-radius:var(--radius-sm);padding:9px 12px;cursor:pointer;transition:all .15s}
+.form-radio.selected{border-color:var(--teal);background:rgba(15,158,125,.1)}
+.form-radio-label{font-size:12px;font-weight:500;color:var(--text2)}
+.form-radio-sub{font-size:10px;color:var(--text3);margin-top:2px}
+.form-radio.selected .form-radio-label{color:var(--teal2)}
+.tier-alert{padding:8px 12px;border-radius:var(--radius-sm);font-size:11px;line-height:1.5;margin-top:6px;display:none}
+.tier-alert.free{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--amber)}
+.tier-alert.paid{background:rgba(15,158,125,.1);border:1px solid rgba(15,158,125,.3);color:var(--teal2)}
+.tier-alert.visible{display:block}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{padding:4px 11px;border-radius:20px;font-size:12px;border:1px solid var(--border2);color:var(--text2);background:var(--surface2);cursor:pointer;transition:all .15s;user-select:none}
+.chip.selected{border-color:var(--teal);background:rgba(15,158,125,.15);color:var(--teal2)}
+.chip-other-wrap{margin-top:7px;display:none}
+.chip-other-wrap.visible{display:block}
+.cta-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;border-radius:var(--radius);background:linear-gradient(135deg,var(--teal),var(--teal2));border:none;color:#fff;font-size:14px;font-weight:600;font-family:var(--font-b);cursor:pointer;transition:opacity .15s}
+.cta-btn:hover{opacity:.88}
+.btn-secondary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;border-radius:var(--radius);background:none;border:1px solid var(--border2);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer;transition:all .15s;margin-top:7px}
+.btn-secondary:hover{background:var(--surface2)}
+.btn-danger{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;border-radius:var(--radius);background:none;border:1px solid rgba(239,68,68,.4);color:var(--coral);font-size:13px;font-family:var(--font-b);cursor:pointer;transition:all .15s;margin-top:7px}
+.btn-danger:hover{background:rgba(239,68,68,.1)}
+.steps{display:flex;gap:5px;margin-bottom:20px}
+.step{flex:1;height:3px;border-radius:2px;background:var(--surface3);transition:background .3s}
+.step.done{background:var(--teal2)}
+.step.active{background:var(--teal)}
+.setup-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:24px 16px;overflow-y:auto}
+.setup-card{width:100%;max-width:500px;background:var(--surface1);border:1px solid var(--border2);border-radius:16px;padding:24px}
+.setup-logo{width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,var(--teal),var(--teal2));display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 16px}
+.setup-title{font-family:var(--font-d);font-size:20px;font-weight:700;text-align:center}
+.setup-sub{font-size:12px;color:var(--text3);text-align:center;margin-top:5px;line-height:1.6}
+.setup-divider{border:none;border-top:1px solid var(--border);margin:18px 0}
+.prof-section{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden}
+.prof-section-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;cursor:pointer}
+.prof-section-head h4{font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
+.prof-section-head h4 i{font-size:15px;color:var(--teal2)}
+.prof-section-body{padding:0 12px 12px;display:none}
+.prof-section-body.open{display:block}
+.prof-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
+.prof-row:last-child{border-bottom:none}
+.prof-row-label{font-size:11px;color:var(--text3);width:72px;flex-shrink:0;padding-top:1px}
+.prof-row-val{flex:1;font-size:12px;color:var(--text2);line-height:1.5}
+.prof-row-actions{display:flex;gap:3px;flex-shrink:0}
+.prof-row-actions button{background:none;border:none;cursor:pointer;color:var(--text3);font-size:13px;padding:2px;transition:color .15s}
+.prof-row-actions button:hover{color:var(--teal2)}
+.prof-row-actions button.del:hover{color:var(--coral)}
+.prof-empty{font-size:12px;color:var(--text3);padding:6px 0;font-style:italic}
+.inline-edit-wrap{display:flex;gap:5px;align-items:center;margin-top:3px}
+.inline-edit-wrap .form-input{height:30px;padding:5px 9px;font-size:12px}
+.inline-edit-save{padding:5px 11px;border-radius:var(--radius-sm);background:var(--teal);border:none;color:#fff;font-size:12px;cursor:pointer}
+.inline-edit-cancel{padding:5px 9px;border-radius:var(--radius-sm);background:none;border:1px solid var(--border2);color:var(--text3);font-size:12px;cursor:pointer}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:200;display:none;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface1);border:1px solid var(--border2);border-radius:16px;padding:22px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto}
+.modal-title{font-family:var(--font-d);font-size:16px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:7px}
+.modal-title i{color:var(--teal2)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--surface2);border:1px solid var(--teal);border-radius:var(--radius);padding:9px 14px;font-size:12px;color:var(--teal2);display:flex;align-items:center;gap:7px;opacity:0;transition:all .3s;pointer-events:none;z-index:999;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.call-screen{display:flex;flex-direction:column;height:calc(100vh - 94px);overflow:hidden;position:relative}
+@media(min-width:768px){
+  .call-body{flex:1;display:flex;overflow:hidden;min-height:0}
+  .call-left{flex:1;display:flex;flex-direction:column;position:relative;min-width:0}
+  .caption-side{width:280px;flex-shrink:0;background:var(--navy2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+  .caption-side.hidden{display:none}
+  .chat-caption-area{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:7px}
+  .ai-face-area{flex:1}
+}
+@media(max-width:767px){
+  .call-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+  .call-left{flex-shrink:0}
+  .caption-side{flex:1;background:var(--navy);border-top:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-height:0}
+  .caption-side.hidden{display:none}
+  .chat-caption-area{flex:1;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+  .ai-face-area{height:180px;flex-shrink:0}
+}
+.char-select-overlay{position:absolute;inset:0;background:rgba(11,31,58,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;padding:20px}
+.char-select-title{font-family:var(--font-d);font-size:17px;font-weight:700;margin-bottom:5px;text-align:center}
+.char-select-sub{font-size:12px;color:var(--text3);margin-bottom:20px;text-align:center}
+.char-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:400px}
+.char-card{background:var(--surface1);border:1px solid var(--border2);border-radius:12px;padding:16px 12px;text-align:center;cursor:pointer;transition:all .2s}
+.char-card:hover{border-color:var(--teal);transform:translateY(-2px)}
+.char-card.selected{border-color:var(--teal);background:rgba(15,158,125,.12)}
+.char-avatar{font-size:36px;margin-bottom:8px}
+.char-name{font-size:13px;font-weight:600;color:var(--text)}
+.char-voice-tag{font-size:10px;color:var(--text3);margin-top:3px}
+.gender-tag{font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:500}
+.tag-m{background:rgba(56,130,220,.25);color:#90c0f0}
+.tag-f{background:rgba(212,83,126,.25);color:#f0a0c0}
+.char-start-btn{margin-top:20px;padding:12px 40px;border-radius:var(--radius);background:linear-gradient(135deg,var(--teal),var(--teal2));border:none;color:#fff;font-size:15px;font-weight:600;font-family:var(--font-b);cursor:pointer}
+.char-start-btn:disabled{opacity:.4;cursor:not-allowed}
+.char-start-btn:not(:disabled):hover{opacity:.88}
+.ai-face-area{display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:var(--navy2)}
+.ai-face-bg{position:absolute;inset:0;background:radial-gradient(ellipse at center,var(--surface2) 0%,var(--navy2) 70%)}
+.ai-avatar-wrap{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center}
+.ai-avatar-circle{width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,var(--teal),var(--teal2));display:flex;align-items:center;justify-content:center;font-size:38px;margin-bottom:8px;box-shadow:0 0 0 2px var(--teal2),0 0 0 5px rgba(15,158,125,.2)}
+.ai-avatar-circle.speaking{animation:rpulse 1.2s ease-in-out infinite}
+@keyframes rpulse{0%,100%{box-shadow:0 0 0 2px var(--teal2),0 0 0 8px rgba(15,158,125,.3),0 0 0 16px rgba(15,158,125,.1)}50%{box-shadow:0 0 0 2px var(--teal2),0 0 0 14px rgba(15,158,125,.4),0 0 0 24px rgba(15,158,125,.15)}}
+.ai-name-tag{background:rgba(0,0,0,.5);backdrop-filter:blur(6px);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:500}
+.ai-status-dot{width:7px;height:7px;border-radius:50%;background:var(--teal2);display:inline-block;margin-right:5px;animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.call-badge{position:absolute;top:8px;right:8px;z-index:20;background:rgba(239,68,68,.85);border-radius:20px;padding:2px 9px;font-size:10px;color:#fff;font-weight:500;display:flex;align-items:center;gap:4px}
+.rec-dot{width:5px;height:5px;border-radius:50%;background:#fff;animation:blink 1s infinite}
+.call-cost{position:absolute;top:8px;left:8px;z-index:20;background:rgba(22,44,74,.8);border:1px solid var(--border);border-radius:20px;padding:2px 9px;font-size:10px;color:var(--text3)}
+.call-cost span{color:var(--teal2);font-weight:500}
+.self-area{position:absolute;bottom:8px;right:8px;z-index:15;width:58px;height:44px;border-radius:7px;background:var(--surface2);border:2px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:20px}
+.self-area.mic-on{border-color:var(--teal2)}
+.self-area.mic-off{border-color:var(--coral)}
+.visual-assist{position:absolute;top:8px;left:8px;right:8px;z-index:10;background:rgba(11,31,58,.88);backdrop-filter:blur(6px);border:1px solid var(--border2);border-radius:9px;padding:8px 10px;display:none}
+.visual-assist.show{display:flex;align-items:flex-start;gap:8px}
+.visual-emoji{font-size:28px;line-height:1;flex-shrink:0}
+.visual-caption{font-size:11px;color:var(--text2);line-height:1.4;flex:1}
+.visual-caption strong{font-size:12px;color:var(--text);display:block;margin-bottom:1px}
+.mic-indicator{display:none;align-items:center;gap:6px;background:rgba(15,158,125,.15);border:1px solid var(--teal);border-radius:20px;padding:4px 14px;font-size:11px;color:var(--teal2)}
+.mic-indicator.show{display:flex}
+.mic-wave{display:flex;gap:2px;align-items:center}
+.mic-wave span{width:3px;background:var(--teal2);border-radius:2px;animation:wave .8s ease-in-out infinite}
+.mic-wave span:nth-child(1){height:8px}.mic-wave span:nth-child(2){height:14px;animation-delay:.1s}.mic-wave span:nth-child(3){height:10px;animation-delay:.2s}.mic-wave span:nth-child(4){height:16px;animation-delay:.15s}.mic-wave span:nth-child(5){height:8px;animation-delay:.05s}
+@keyframes wave{0%,100%{transform:scaleY(.5)}50%{transform:scaleY(1)}}
+.caption-panel-header{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--navy2)}
+.cap-toggles{display:flex;gap:4px}
+.cap-toggle{display:flex;align-items:center;gap:3px;padding:3px 8px;border-radius:10px;border:1px solid var(--border2);background:none;font-size:10px;color:var(--text3);cursor:pointer;font-family:var(--font-b);transition:all .15s}
+.cap-toggle.on{border-color:var(--teal);color:var(--teal2);background:rgba(15,158,125,.1)}
+.chat-caption-area::-webkit-scrollbar{width:3px}
+.chat-caption-area::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:2px}
+.cap-entry{display:flex;flex-direction:column}.cap-entry.ai{align-items:flex-start}.cap-entry.me{align-items:flex-end}
+.cap-who{font-size:10px;color:var(--text3);margin-bottom:3px;display:flex;align-items:center;gap:4px}
+.cap-entry.me .cap-who{justify-content:flex-end}
+.cap-en{max-width:90%;padding:7px 11px;border-radius:11px;font-size:13px;line-height:1.55;word-break:break-word}
+.cap-entry.ai .cap-en{background:var(--surface2);color:var(--text);border-radius:4px 11px 11px 11px}
+.cap-entry.me .cap-en{background:rgba(15,158,125,.25);color:var(--teal2);border-radius:11px 4px 11px 11px}
+.cap-jp{font-size:11px;color:var(--text3);padding:3px 11px;line-height:1.5;display:none}
+.cap-jp.show{display:block}
+.call-controls{display:flex;align-items:center;justify-content:space-around;padding:10px 8px 7px;background:var(--navy2);border-top:1px solid var(--border);flex-shrink:0}
+.ctrl-item{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px}
+.ctrl-btn{width:46px;height:46px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;background:var(--surface2)}
+.ctrl-btn:hover{background:var(--surface3)}
+.ctrl-btn.on{background:rgba(15,158,125,.2);border:1px solid var(--teal)}
+.ctrl-btn.muted-btn{background:rgba(239,68,68,.15);border:1px solid var(--coral)}
+.ctrl-btn.end-btn{background:var(--coral);width:52px;height:52px}
+.ctrl-btn.end-btn:hover{opacity:.85}
+.ctrl-label{font-size:9px;color:var(--text3);white-space:nowrap}
+.input-panel{background:var(--surface1);border-top:1px solid var(--border2);padding:8px 12px 10px;flex-shrink:0}
+.input-panel-handle{width:30px;height:3px;background:var(--border2);border-radius:2px;margin:0 auto 8px}
+.mic-indicator-row{display:flex;justify-content:center;min-height:24px;margin-bottom:3px}
+.input-hints{display:flex;gap:5px;margin-bottom:6px;flex-wrap:wrap}
+.input-hint-chip{padding:3px 9px;border-radius:12px;font-size:11px;background:var(--surface2);border:1px solid var(--border2);color:var(--text3);cursor:pointer;transition:all .15s}
+.input-hint-chip:hover{border-color:var(--teal);color:var(--teal2)}
+.input-row{display:flex;gap:7px;align-items:flex-end}
+.chat-textarea{flex:1;resize:none;min-height:36px;max-height:80px;padding:8px 13px;background:var(--surface2);border:1px solid var(--border2);border-radius:18px;color:var(--text);font-size:13px;font-family:var(--font-b);outline:none;line-height:1.4;transition:border-color .15s}
+.chat-textarea:focus{border-color:var(--teal)}
+.chat-textarea::placeholder{color:var(--text3)}
+.send-btn-call{width:36px;height:36px;border-radius:50%;background:var(--teal);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.send-btn-call:disabled{opacity:.35;cursor:default}
+.speed-wrap{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text3)}
+.speed-slider{flex:1;accent-color:var(--teal2);cursor:pointer}
+.typing-dots{display:flex;gap:3px;padding:2px 0}
+.typing-dots span{width:6px;height:6px;border-radius:50%;background:var(--text3);animation:tdot 1.2s infinite}
+.typing-dots span:nth-child(2){animation-delay:.2s}.typing-dots span:nth-child(3){animation-delay:.4s}
+@keyframes tdot{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-5px);opacity:1}}
+.api-step{display:flex;gap:10px;margin-bottom:10px;align-items:flex-start}
+.api-step-num{width:20px;height:20px;border-radius:50%;background:var(--teal2);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-title{font-size:12px;font-weight:500;color:var(--text)}
+.step-sub{font-size:11px;color:var(--text3);margin-top:2px;line-height:1.4}
+.ico{display:block;flex-shrink:0}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+.modal-overlay#modal-profile .modal, .modal-overlay#modal-settings .modal { text-align:left; }
+</style>
+</head>
+<body>
+<div class="toast" id="toast"><i class="ti ti-check" style="font-size:14px"></i><span id="toast-msg"></span></div>
+
+<!-- ═══════════════════ SCR-00b: プロファイル初期設定 ═══════════════════ -->
+<div class="screen" id="scr-profsetup" style="background:var(--navy)" id="scr-profsetup-inner">
+  <div class="setup-wrap">
+    <div class="setup-card">
+      <div class="steps"><div class="step done"></div><div class="step active"></div><div class="step"></div></div>
+      <div class="setup-logo">👤</div>
+      <h1 class="setup-title">あなたのことを教えてください</h1>
+      <p class="setup-sub">AIがあなたに合わせた会話をするために使います<br>後でいつでも変更・追加できます</p>
+      <hr class="setup-divider">
+
+      <!-- 名前 -->
+      <div class="form-group">
+        <label class="form-label">呼ばれたい名前 <span class="req">*</span></label>
+        <input class="form-input" id="prof-name" type="text" placeholder="例：太郎、Taro">
+        <div class="form-err" id="name-err">名前を入力してください</div>
+      </div>
+
+      <!-- 年齢 -->
+      <div class="form-group">
+        <label class="form-label">年齢</label>
+        <div class="chips" id="age-chips">
+          <div class="chip" data-val="10代" onclick="selectSingle(this,'age-chips','prof-age-other')">10代</div>
+          <div class="chip" data-val="20代" onclick="selectSingle(this,'age-chips','prof-age-other')">20代</div>
+          <div class="chip" data-val="30代" onclick="selectSingle(this,'age-chips','prof-age-other')">30代</div>
+          <div class="chip" data-val="40代" onclick="selectSingle(this,'age-chips','prof-age-other')">40代</div>
+          <div class="chip" data-val="50代以上" onclick="selectSingle(this,'age-chips','prof-age-other')">50代以上</div>
+          <div class="chip chip-other-trigger" data-val="other" onclick="selectSingle(this,'age-chips','prof-age-other')">その他</div>
+        </div>
+        <div class="chip-other-wrap" id="prof-age-other-wrap">
+          <input class="form-input" id="prof-age-other" type="text" placeholder="年齢を入力（例：35歳）">
+        </div>
+      </div>
+
+      <!-- 英語レベル -->
+      <div class="form-group">
+        <label class="form-label">英語レベル</label>
+        <div class="chips" id="level-chips">
+          <div class="chip" data-val="junior" onclick="selectSingle(this,'level-chips',null)">中学生レベル</div>
+          <div class="chip selected" data-val="college" onclick="selectSingle(this,'level-chips',null)">大学生レベル</div>
+          <div class="chip" data-val="senior" onclick="selectSingle(this,'level-chips',null)">高校生レベル</div>
+          <div class="chip" data-val="adult" onclick="selectSingle(this,'level-chips',null)">社会人レベル</div>
+          <div class="chip" data-val="business" onclick="selectSingle(this,'level-chips',null)">ビジネス英語</div>
+        </div>
+      </div>
+
+      <!-- 職業 -->
+      <div class="form-group">
+        <label class="form-label">職業・立場</label>
+        <div class="chips" id="job-chips">
+          <div class="chip" data-val="会社員" onclick="selectSingle(this,'job-chips','prof-job-other')">会社員</div>
+          <div class="chip" data-val="学生" onclick="selectSingle(this,'job-chips','prof-job-other')">学生</div>
+          <div class="chip" data-val="主婦・主夫" onclick="selectSingle(this,'job-chips','prof-job-other')">主婦・主夫</div>
+          <div class="chip" data-val="自営業" onclick="selectSingle(this,'job-chips','prof-job-other')">自営業</div>
+          <div class="chip" data-val="フリーランス" onclick="selectSingle(this,'job-chips','prof-job-other')">フリーランス</div>
+          <div class="chip" data-val="教育者" onclick="selectSingle(this,'job-chips','prof-job-other')">教育者</div>
+          <div class="chip chip-other-trigger" data-val="other" onclick="selectSingle(this,'job-chips','prof-job-other')">その他</div>
+        </div>
+        <div class="chip-other-wrap" id="prof-job-other-wrap">
+          <input class="form-input" id="prof-job-other" type="text" placeholder="職業を入力（例：エンジニア、医師）">
+        </div>
+      </div>
+
+      <!-- 英語の目標 -->
+      <div class="form-group">
+        <label class="form-label">英語を学ぶ目標</label>
+        <div class="chips" id="goal-chips">
+          <div class="chip" data-val="TOEIC" onclick="toggleGoalChip(this)">TOEIC/TOEFL対策</div>
+          <div class="chip" data-val="旅行" onclick="toggleGoalChip(this)">海外旅行</div>
+          <div class="chip" data-val="仕事" onclick="toggleGoalChip(this)">仕事・ビジネス</div>
+          <div class="chip" data-val="海外移住" onclick="toggleGoalChip(this)">海外移住</div>
+          <div class="chip" data-val="映画・音楽" onclick="toggleGoalChip(this)">映画・音楽を楽しむ</div>
+          <div class="chip" data-val="留学" onclick="toggleGoalChip(this)">留学</div>
+          <div class="chip" data-val="日常会話" onclick="toggleGoalChip(this)">日常会話力向上</div>
+        </div>
+        <input class="form-input" id="prof-goal-free" type="text" placeholder="具体的な目標（任意）例：TOEIC 800点を目指したい" style="margin-top:8px">
+      </div>
+
+      <!-- 趣味 -->
+      <div class="form-group">
+        <label class="form-label">趣味・興味（複数選択OK）</label>
+        <div class="chips" id="hobby-chips">
+          <div class="chip" data-val="スポーツ" onclick="toggleChip(this)">スポーツ</div>
+          <div class="chip" data-val="音楽" onclick="toggleChip(this)">音楽</div>
+          <div class="chip" data-val="映画・ドラマ" onclick="toggleChip(this)">映画・ドラマ</div>
+          <div class="chip" data-val="アニメ・マンガ" onclick="toggleChip(this)">アニメ・マンガ</div>
+          <div class="chip" data-val="ゲーム" onclick="toggleChip(this)">ゲーム</div>
+          <div class="chip" data-val="料理" onclick="toggleChip(this)">料理</div>
+          <div class="chip" data-val="旅行" onclick="toggleChip(this)">旅行</div>
+          <div class="chip" data-val="テクノロジー" onclick="toggleChip(this)">テクノロジー</div>
+          <div class="chip" data-val="読書" onclick="toggleChip(this)">読書</div>
+          <div class="chip" data-val="ファッション" onclick="toggleChip(this)">ファッション</div>
+          <div class="chip" data-val="アウトドア" onclick="toggleChip(this)">アウトドア</div>
+          <div class="chip" data-val="ペット" onclick="toggleChip(this)">ペット</div>
+        </div>
+        <input class="form-input" id="prof-hobby-free" type="text" placeholder="上記にない趣味を入力（カンマ区切り）" style="margin-top:8px">
+      </div>
+
+      <!-- 苦手 -->
+      <div class="form-group">
+        <label class="form-label">英語で苦手なこと（複数選択OK）</label>
+        <div class="chips" id="weak-chips">
+          <div class="chip" data-val="リスニング" onclick="toggleChip(this)">リスニング</div>
+          <div class="chip" data-val="スピーキング" onclick="toggleChip(this)">スピーキング</div>
+          <div class="chip" data-val="文法" onclick="toggleChip(this)">文法</div>
+          <div class="chip" data-val="語彙" onclick="toggleChip(this)">語彙・単語</div>
+          <div class="chip" data-val="発音" onclick="toggleChip(this)">発音</div>
+          <div class="chip" data-val="ライティング" onclick="toggleChip(this)">ライティング</div>
+          <div class="chip" data-val="読解" onclick="toggleChip(this)">読解</div>
+        </div>
+      </div>
+
+      <button class="cta-btn" onclick="saveProfile(false)"><i class="ti ti-check"></i> 保存してはじめる</button>
+      <button class="btn-secondary" onclick="skipProfile()"><i class="ti ti-skip-forward"></i> スキップ（会話しながら覚えてもらう）</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="screen" id="scr-main">
+  <div class="topbar">
+    <div class="topbar-brand">
+      <div class="topbar-logo">AI</div>
+      <span class="topbar-title">English AI Teacher</span>
+    </div>
+    <div class="cost-badge"><span id="cost-today-disp">$0.0000</span></div>
+  </div>
+  <div class="nav">
+    <button class="nav-btn active" id="nav-call-btn"><i class="ti ti-phone"></i>通話</button>
+    <button class="nav-btn" onclick="openProfileModal()"><i class="ti ti-user"></i>プロファイル</button>
+    <button class="nav-btn" onclick="openSettingsModal()"><i class="ti ti-settings"></i>設定</button>
+  </div>
+
+  <div id="tab-call" style="flex:1;display:flex;flex-direction:column;padding:0">
+    <div class="call-screen">
+      <div class="char-select-overlay" id="char-select-overlay">
+        <div class="char-select-title">先生を選ぶ</div>
+        <div class="char-select-sub">Language Parentがあなたのレベルに合わせて話してくれます</div>
+        <div class="char-pair" id="char-cards"></div>
+        <button class="char-start-btn" onclick="startCall()" id="char-start-btn" disabled>📞 通話を始める</button>
+      </div>
+      <div class="call-body">
+        <div class="call-left">
+          <div class="ai-face-area">
+            <div class="ai-face-bg"></div>
+            <div class="call-badge" id="call-badge" style="display:none"><span class="rec-dot"></span> 通話中</div>
+            <div class="call-cost">今日 <span id="call-cost-val">$0.0000</span></div>
+            <div class="visual-assist" id="visual-assist">
+              <div class="visual-emoji" id="visual-emoji"></div>
+              <div class="visual-caption"><strong id="visual-title"></strong><span id="visual-desc"></span></div>
+            </div>
+            <div class="ai-avatar-wrap">
+              <div class="ai-avatar-circle" id="ai-avatar-circle"><span id="ai-avatar-emoji">🎓</span></div>
+              <div class="ai-name-tag"><span class="ai-status-dot"></span><span id="ai-name-tag">先生を選んでください</span></div>
+            </div>
+            <div class="self-area mic-off" id="self-area">👤</div>
+          </div>
+        </div>
+        <div class="caption-side" id="caption-side">
+          <div class="caption-panel-header">
+            <span style="font-size:11px;color:var(--text3)">💬 字幕</span>
+            <div class="cap-toggles">
+              <button class="cap-toggle on" id="toggle-en" onclick="toggleCapEn()">EN</button>
+              <button class="cap-toggle" id="toggle-jp" onclick="toggleCapJp()">JP</button>
+            </div>
+          </div>
+          <div class="chat-caption-area" id="caption-body">
+            <div style="text-align:center;padding:20px 0;font-size:12px;color:var(--text3)">通話が始まると字幕がここに表示されます</div>
+          </div>
+        </div>
+      </div>
+      <div class="call-controls">
+        <div class="ctrl-item">
+          <button class="ctrl-btn muted-btn" id="btn-mic" onclick="toggleMic()"><span id="mic-icon-wrap"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span></button>
+          <span class="ctrl-label" id="mic-label">ミュート</span>
+        </div>
+        <div class="ctrl-item">
+          <button class="ctrl-btn on" id="btn-volume" onclick="toggleVolume()"><span id="vol-icon-wrap"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></span></button>
+          <span class="ctrl-label">AI音声</span>
+        </div>
+        <div class="ctrl-item">
+          <button class="ctrl-btn end-btn" onclick="endCall()"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 9.88a2 2 0 0 1 2-2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L10.68 13.31z"/><line x1="23" y1="1" x2="1" y2="23"/></svg></button>
+          <span class="ctrl-label">終話</span>
+        </div>
+        <div class="ctrl-item">
+          <button class="ctrl-btn on" id="btn-visual" onclick="toggleVisual()"><span id="visual-icon-wrap"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span></button>
+          <span class="ctrl-label">ビジュアル</span>
+        </div>
+        <div class="ctrl-item">
+          <button class="ctrl-btn on" id="btn-caption" onclick="cycleCaption()"><span id="caption-icon-wrap"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span></button>
+          <span class="ctrl-label" id="caption-label">EN字幕</span>
+        </div>
+      </div>
+      <div class="input-panel">
+        <div class="input-panel-handle"></div>
+        <div class="mic-indicator-row">
+          <div class="mic-indicator" id="mic-indicator">
+            <div class="mic-wave"><span></span><span></span><span></span><span></span><span></span></div>
+            <span>認識中...</span>
+          </div>
+        </div>
+        <div class="input-hints" id="input-hints"></div>
+        <div class="input-row">
+          <textarea class="chat-textarea" id="chat-input" placeholder="英語で入力... (Enterで送信)" onkeydown="chatKey(event)" oninput="autoResize(this)" rows="1"></textarea>
+          <button class="send-btn-call" id="send-btn" onclick="sendMessage()"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-profile">
+   <div class="modal" style="max-width:520px">
+    <div class="modal-title">
+      <i class="ti ti-user"></i> プロファイル
+      <button onclick="closeProfileModal()" style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="prof-section">
+      <div class="prof-section-head" onclick="toggleSection('basic')"><h4><i class="ti ti-user"></i> 基本情報</h4><i class="ti ti-chevron-down" id="psec-basic-icon"></i></div>
+      <div class="prof-section-body open" id="psec-basic-body"></div>
+    </div>
+    <div class="prof-section">
+      <div class="prof-section-head" onclick="toggleSection('goal')"><h4><i class="ti ti-target"></i> 英語学習の目標</h4><i class="ti ti-chevron-down" id="psec-goal-icon"></i></div>
+      <div class="prof-section-body" id="psec-goal-body"></div>
+    </div>
+    <div class="prof-section">
+      <div class="prof-section-head" onclick="toggleSection('hobby')"><h4><i class="ti ti-heart"></i> 趣味・興味</h4><i class="ti ti-chevron-down" id="psec-hobby-icon"></i></div>
+      <div class="prof-section-body" id="psec-hobby-body"></div>
+    </div>
+    <div class="prof-section">
+      <div class="prof-section-head" onclick="toggleSection('weak')"><h4><i class="ti ti-alert-circle"></i> 苦手なこと</h4><i class="ti ti-chevron-down" id="psec-weak-icon"></i></div>
+      <div class="prof-section-body" id="psec-weak-body"></div>
+    </div>
+    <div class="prof-section">
+      <div class="prof-section-head" onclick="toggleSection('auto')"><h4><i class="ti ti-brain"></i> AIが覚えたこと</h4><i class="ti ti-chevron-down" id="psec-auto-icon"></i></div>
+      <div class="prof-section-body" id="psec-auto-body"></div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="cta-btn" onclick="openProfileEdit()"><i class="ti ti-edit"></i> プロファイルを編集</button>
+      <button class="btn-danger" onclick="resetProfile()"><i class="ti ti-refresh"></i> プロファイルを初期化</button>
+    </div>
+   </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-settings">
+   <div class="modal" style="max-width:520px">
+    <div class="modal-title">
+      <i class="ti ti-settings"></i> 設定
+      <button onclick="closeSettingsModal()" style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="section-label">API設定</div>
+    <div class="card">
+      <div style="margin-bottom:14px;padding:10px 12px;background:rgba(15,158,125,.08);border-radius:var(--radius-sm)">
+        <p style="font-size:12px;font-weight:500;color:var(--teal2);margin-bottom:8px">📋 APIキーの取得方法（無料）</p>
+        <div class="api-step"><div class="api-step-num">1</div><div><div class="step-title">Google AI Studioを開く</div><div class="step-sub"><a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--teal2)">aistudio.google.com/apikey</a></div></div></div>
+        <div class="api-step"><div class="api-step-num">2</div><div><div class="step-title">Googleアカウントでサインイン</div><div class="step-sub">GmailのIDとパスワードでOK</div></div></div>
+        <div class="api-step"><div class="api-step-num">3</div><div><div class="step-title">「Create API key」をクリック</div><div class="step-sub">「AIza...」で始まる文字列をコピーして下に貼り付け</div></div></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gemini API キー <span class="req">*</span></label>
+        <div class="input-wrap">
+          <input class="form-input" id="set-api-key" type="password" placeholder="AIza...">
+          <button class="input-eye" onclick="toggleKeyEye()"><i class="ti ti-eye" id="set-eye-icon"></i></button>
+        </div>
+        <div class="hint-text">キーは端末のみに保存。外部に送信されません。</div>
+        <div class="form-err" id="set-key-err">APIキーを入力してください（20文字以上）</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">利用 Tier</label>
+        <div class="form-radio-group">
+          <div class="form-radio" id="set-tier-free" onclick="selectTier('free')"><div class="form-radio-label">⚡ 無料</div><div class="form-radio-sub">10回/分・完全無料</div></div>
+          <div class="form-radio selected" id="set-tier-paid" onclick="selectTier('paid')"><div class="form-radio-label">✅ 有料</div><div class="form-radio-sub">高速・プライバシー保護</div></div>
+        </div>
+        <div class="tier-alert free" id="alert-free">⚠ レート制限時は自動リトライします</div>
+        <div class="tier-alert paid visible" id="alert-paid">✅ データはGoogleの学習に使用されません</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">モデル</label>
+        <select class="form-select" id="set-model">
+          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（最安・推奨）</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash（高品質）</option>
+        </select>
+      </div>
+      <div class="form-group" id="monthly-group">
+        <label class="form-label">月額上限アラート（USD）</label>
+        <input class="form-input" id="set-monthly" type="number" value="5" min="1" max="250">
+      </div>
+      <div class="form-group">
+        <label class="form-label">AI音声速度</label>
+        <div class="speed-wrap">
+          <span>🐢</span>
+          <input class="speed-slider" type="range" id="speed-slider" min="0.5" max="1.5" step="0.05" value="0.75" oninput="onSpeedInput(this)">
+          <span>🐇</span>
+          <span id="speed-val" style="min-width:36px;text-align:right;font-size:12px;color:var(--teal2);font-weight:500">0.75x</span>
+        </div>
+        <div class="hint-text">通話中に「もっとゆっくり話して」と言うと自動調整されます</div>
+      </div>
+      <button class="cta-btn" onclick="saveSettings()"><i class="ti ti-device-floppy"></i> 設定を保存</button>
+    </div>
+    <div class="section-label" style="margin-top:14px">利用状況</div>
+    <div class="card" id="cost-detail-card">読み込み中...</div>
+    <button class="btn-danger" onclick="resetAll()"><i class="ti ti-trash"></i> 全データをリセット</button>
+   </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ プロファイル編集モーダル ═══════════════════ -->
+<div class="modal-overlay" id="profile-edit-modal">
+  <div class="modal">
+    <div class="modal-title"><i class="ti ti-user-edit"></i> プロファイルを編集</div>
+
+    <div class="form-group">
+      <label class="form-label">呼ばれたい名前 <span class="req">*</span></label>
+      <input class="form-input" id="edit-name" type="text">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">年齢</label>
+      <div class="chips" id="edit-age-chips">
+        <div class="chip" data-val="10代" onclick="selectSingle(this,'edit-age-chips','edit-age-other')">10代</div>
+        <div class="chip" data-val="20代" onclick="selectSingle(this,'edit-age-chips','edit-age-other')">20代</div>
+        <div class="chip" data-val="30代" onclick="selectSingle(this,'edit-age-chips','edit-age-other')">30代</div>
+        <div class="chip" data-val="40代" onclick="selectSingle(this,'edit-age-chips','edit-age-other')">40代</div>
+        <div class="chip" data-val="50代以上" onclick="selectSingle(this,'edit-age-chips','edit-age-other')">50代以上</div>
+        <div class="chip chip-other-trigger" data-val="other" onclick="selectSingle(this,'edit-age-chips','edit-age-other')">その他</div>
+      </div>
+      <div class="chip-other-wrap" id="edit-age-other-wrap">
+        <input class="form-input" id="edit-age-other" type="text" placeholder="年齢を入力">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">英語レベル</label>
+      <div class="chips" id="edit-level-chips">
+        <div class="chip" data-val="junior" onclick="selectSingle(this,'edit-level-chips',null)">中学生レベル</div>
+        <div class="chip" data-val="senior" onclick="selectSingle(this,'edit-level-chips',null)">高校生レベル</div>
+        <div class="chip" data-val="college" onclick="selectSingle(this,'edit-level-chips',null)">大学生レベル</div>
+        <div class="chip" data-val="adult" onclick="selectSingle(this,'edit-level-chips',null)">社会人レベル</div>
+        <div class="chip" data-val="business" onclick="selectSingle(this,'edit-level-chips',null)">ビジネス英語</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">職業・立場</label>
+      <div class="chips" id="edit-job-chips">
+        <div class="chip" data-val="会社員" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">会社員</div>
+        <div class="chip" data-val="学生" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">学生</div>
+        <div class="chip" data-val="主婦・主夫" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">主婦・主夫</div>
+        <div class="chip" data-val="自営業" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">自営業</div>
+        <div class="chip" data-val="フリーランス" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">フリーランス</div>
+        <div class="chip" data-val="教育者" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">教育者</div>
+        <div class="chip chip-other-trigger" data-val="other" onclick="selectSingle(this,'edit-job-chips','edit-job-other')">その他</div>
+      </div>
+      <div class="chip-other-wrap" id="edit-job-other-wrap">
+        <input class="form-input" id="edit-job-other" type="text" placeholder="職業を入力">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">英語の目標（複数選択OK）</label>
+      <div class="chips" id="edit-goal-chips">
+        <div class="chip" data-val="TOEIC" onclick="toggleChip(this)">TOEIC/TOEFL対策</div>
+        <div class="chip" data-val="旅行" onclick="toggleChip(this)">海外旅行</div>
+        <div class="chip" data-val="仕事" onclick="toggleChip(this)">仕事・ビジネス</div>
+        <div class="chip" data-val="海外移住" onclick="toggleChip(this)">海外移住</div>
+        <div class="chip" data-val="映画・音楽" onclick="toggleChip(this)">映画・音楽を楽しむ</div>
+        <div class="chip" data-val="留学" onclick="toggleChip(this)">留学</div>
+        <div class="chip" data-val="日常会話" onclick="toggleChip(this)">日常会話力向上</div>
+      </div>
+      <input class="form-input" id="edit-goal-free" type="text" placeholder="具体的な目標（任意）" style="margin-top:8px">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">趣味・興味（複数選択OK）</label>
+      <div class="chips" id="edit-hobby-chips">
+        <div class="chip" data-val="スポーツ" onclick="toggleChip(this)">スポーツ</div>
+        <div class="chip" data-val="音楽" onclick="toggleChip(this)">音楽</div>
+        <div class="chip" data-val="映画・ドラマ" onclick="toggleChip(this)">映画・ドラマ</div>
+        <div class="chip" data-val="アニメ・マンガ" onclick="toggleChip(this)">アニメ・マンガ</div>
+        <div class="chip" data-val="ゲーム" onclick="toggleChip(this)">ゲーム</div>
+        <div class="chip" data-val="料理" onclick="toggleChip(this)">料理</div>
+        <div class="chip" data-val="旅行" onclick="toggleChip(this)">旅行</div>
+        <div class="chip" data-val="テクノロジー" onclick="toggleChip(this)">テクノロジー</div>
+        <div class="chip" data-val="読書" onclick="toggleChip(this)">読書</div>
+        <div class="chip" data-val="ファッション" onclick="toggleChip(this)">ファッション</div>
+        <div class="chip" data-val="アウトドア" onclick="toggleChip(this)">アウトドア</div>
+        <div class="chip" data-val="ペット" onclick="toggleChip(this)">ペット</div>
+      </div>
+      <input class="form-input" id="edit-hobby-free" type="text" placeholder="上記にない趣味（カンマ区切り）" style="margin-top:8px">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">英語で苦手なこと（複数選択OK）</label>
+      <div class="chips" id="edit-weak-chips">
+        <div class="chip" data-val="リスニング" onclick="toggleChip(this)">リスニング</div>
+        <div class="chip" data-val="スピーキング" onclick="toggleChip(this)">スピーキング</div>
+        <div class="chip" data-val="文法" onclick="toggleChip(this)">文法</div>
+        <div class="chip" data-val="語彙" onclick="toggleChip(this)">語彙・単語</div>
+        <div class="chip" data-val="発音" onclick="toggleChip(this)">発音</div>
+        <div class="chip" data-val="ライティング" onclick="toggleChip(this)">ライティング</div>
+        <div class="chip" data-val="読解" onclick="toggleChip(this)">読解</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="cta-btn" style="flex:2" onclick="saveProfileEdit()"><i class="ti ti-check"></i> 保存</button>
+      <button class="btn-secondary" style="flex:1;margin-top:0" onclick="closeProfileEdit()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const LS = {
+  get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+};
+const K = {
+  API_KEY:'lm_api_key', MODEL:'lm_model', TIER:'lm_tier', MONTHLY_LIMIT:'lm_monthly_limit',
+  PROFILE:'lm_user_profile', LEVEL:'lm_level', SESSION_COUNT:'lm_session_count',
+  COST_TODAY:'lm_cost_today', COST_TOTAL:'lm_cost_total', COST_MONTHLY:'lm_cost_monthly',
+  TOKENS_TODAY:'lm_tokens_today', TOKENS_TOTAL:'lm_tokens_total',
+  P_SCORES:'lm_principle_scores', AUTO_LEARNED:'lm_auto_learned',
+  VOICE_SPEED:'lm_voice_speed', MIC_PERMITTED:'lm_mic_permitted',
+};
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function levelLabel(v) {
+  return {junior:'中学生レベル',senior:'高校生レベル',college:'大学生レベル',adult:'社会人レベル',business:'ビジネス英語'}[v]||v;
+}
+
+function showToast(msg, dur) {
+  dur = dur || 3000;
+  const t = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg;
+  t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, dur);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (!LS.get(K.PROFILE)) { showScreen('scr-profsetup'); return; }
+  showScreen('scr-main');
+  initCallScreen();
+  updateCostDisplay();
+});
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  var el = document.getElementById(id);
+  if (el) el.classList.add('active');
+}
+
+function openProfileModal() {
+  document.getElementById('modal-profile').classList.add('open');
+  renderProfileTab();
+}
+function closeProfileModal() {
+  document.getElementById('modal-profile').classList.remove('open');
+}
+function openSettingsModal() {
+  document.getElementById('modal-settings').classList.add('open');
+  loadSettings();
+}
+function closeSettingsModal() {
+  document.getElementById('modal-settings').classList.remove('open');
+}
+
+var currentTier = 'paid';
+function selectTier(tier) {
+  currentTier = tier;
+  document.getElementById('set-tier-free').classList.toggle('selected', tier === 'free');
+  document.getElementById('set-tier-paid').classList.toggle('selected', tier === 'paid');
+  document.getElementById('alert-free').classList.toggle('visible', tier === 'free');
+  document.getElementById('alert-paid').classList.toggle('visible', tier === 'paid');
+  document.getElementById('monthly-group').style.display = tier === 'paid' ? '' : 'none';
+}
+function toggleKeyEye() {
+  var inp = document.getElementById('set-api-key');
+  var ico = document.getElementById('set-eye-icon');
+  if (inp.type === 'password') { inp.type = 'text'; ico.className = 'ti ti-eye-off'; }
+  else { inp.type = 'password'; ico.className = 'ti ti-eye'; }
+}
+function onSpeedInput(el) {
+  var v = parseFloat(el.value);
+  document.getElementById('speed-val').textContent = v.toFixed(2) + 'x';
+  LS.set(K.VOICE_SPEED, v);
+}
+function loadSettings() {
+  var key   = LS.get(K.API_KEY) || '';
+  var tier  = LS.get(K.TIER) || 'paid';
+  var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+  var limit = LS.get(K.MONTHLY_LIMIT) || 5;
+  var spd   = LS.get(K.VOICE_SPEED) || 0.75;
+  var keyEl = document.getElementById('set-api-key');
+  if (keyEl && !keyEl.value) keyEl.value = key;
+  var modelEl = document.getElementById('set-model');
+  if (modelEl) modelEl.value = model;
+  selectTier(tier);
+  var limitEl = document.getElementById('set-monthly');
+  if (limitEl) limitEl.value = limit;
+  var sl = document.getElementById('speed-slider');
+  var sv = document.getElementById('speed-val');
+  if (sl) sl.value = spd;
+  if (sv) sv.textContent = parseFloat(spd).toFixed(2) + 'x';
+  renderCostCard();
+}
+function saveSettings() {
+  var key = document.getElementById('set-api-key').value.trim();
+  var err = document.getElementById('set-key-err');
+  if (!key || key.length < 20) { err.classList.add('visible'); return; }
+  err.classList.remove('visible');
+  LS.set(K.API_KEY, key);
+  LS.set(K.MODEL, document.getElementById('set-model').value);
+  LS.set(K.TIER, currentTier);
+  LS.set(K.MONTHLY_LIMIT, parseFloat(document.getElementById('set-monthly').value) || 5);
+  updateCostDisplay();
+  showToast('設定を保存しました ✓');
+}
+function renderCostCard() {
+  var isFree = (LS.get(K.TIER) || 'paid') === 'free';
+  var tt   = LS.get(K.TOKENS_TODAY)  || {input:0,output:0};
+  var ttot = LS.get(K.TOKENS_TOTAL)  || {input:0,output:0};
+  var ct   = LS.get(K.COST_TODAY)    || 0;
+  var cm   = LS.get(K.COST_MONTHLY)  || 0;
+  var ctot = LS.get(K.COST_TOTAL)    || 0;
+  var lim  = LS.get(K.MONTHLY_LIMIT) || 5;
+  var pct  = Math.min(100, cm / lim * 100).toFixed(1);
+  var card = document.getElementById('cost-detail-card');
+  if (!card) return;
+  if (isFree) {
+    card.innerHTML =
+      '<div style="background:rgba(15,158,125,.1);border:1px solid rgba(15,158,125,.3);border-radius:8px;padding:10px;margin-bottom:10px">' +
+      '<div style="font-size:12px;font-weight:600;color:var(--teal2)">✅ 無料Tier — 料金は発生しません</div></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<div><div style="font-size:10px;color:var(--text3)">今日のトークン</div>' +
+      '<div style="font-size:18px;font-weight:600;color:var(--teal2)">' + (tt.input + tt.output).toLocaleString() + '</div></div>' +
+      '<div><div style="font-size:10px;color:var(--text3)">累計トークン</div>' +
+      '<div style="font-size:18px;font-weight:600;color:var(--teal2)">' + (ttot.input + ttot.output).toLocaleString() + '</div></div></div>';
+  } else {
+    card.innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">' +
+      '<div><div style="font-size:10px;color:var(--text3)">今日</div><div style="font-size:18px;font-weight:600;color:var(--teal2)">$' + ct.toFixed(4) + '</div></div>' +
+      '<div><div style="font-size:10px;color:var(--text3)">今月</div><div style="font-size:18px;font-weight:600">$' + cm.toFixed(4) + '</div></div></div>' +
+      '<div style="height:5px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-bottom:8px">' +
+      '<div style="height:5px;background:' + (parseFloat(pct) > 80 ? 'var(--coral)' : 'var(--teal2)') + ';width:' + pct + '%;border-radius:3px"></div></div>' +
+      '<div style="font-size:10px;color:var(--text3)">上限$' + lim + 'に対して' + pct + '% | 累計$' + ctot.toFixed(4) + '</div>';
+  }
+}
+function resetAll() {
+  if (!confirm('全データをリセットしますか？')) return;
+  Object.values(K).forEach(function(k) { localStorage.removeItem(k); });
+  location.reload();
+}
+function updateCostDisplay() {
+  var isFree = (LS.get(K.TIER) || 'paid') === 'free';
+  var el = document.getElementById('cost-today-disp');
+  if (!el) return;
+  if (isFree) { el.textContent = '無料'; el.style.color = 'var(--teal2)'; }
+  else { el.textContent = '$' + (LS.get(K.COST_TODAY) || 0).toFixed(4); el.style.color = ''; }
+}
+function updateCallCostDisplay() {
+  var el = document.getElementById('call-cost-val');
+  if (!el) return;
+  if ((LS.get(K.TIER) || 'paid') === 'free') { el.textContent = '無料'; el.style.color = 'var(--teal2)'; }
+  else { el.textContent = '$' + (LS.get(K.COST_TODAY) || 0).toFixed(4); el.style.color = ''; }
+}
+
+// ════════ CHIP HELPERS ════════
+// 単一選択チップ（「その他」の場合に入力欄を表示）
+function selectSingle(el, groupId, otherInputId) {
+  document.querySelectorAll(`#${groupId} .chip`).forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  if (otherInputId) {
+    const wrap = document.getElementById(otherInputId + '-wrap');
+    if (wrap) wrap.classList.toggle('visible', el.dataset.val === 'other');
+    if (el.dataset.val !== 'other') {
+      const inp = document.getElementById(otherInputId);
+      if (inp) inp.value = '';
+    }
+  }
+}
+// 複数選択チップ
+function toggleChip(el) { el.classList.toggle('selected'); }
+// 「その他」を含む目標チップ（複数選択）
+function toggleGoalChip(el) { el.classList.toggle('selected'); }
+
+function getSelected(groupId) {
+  return Array.from(document.querySelectorAll(`#${groupId} .chip.selected`)).map(c => c.dataset.val);
+}
+function getSingleVal(groupId, otherInputId) {
+  const selected = document.querySelector(`#${groupId} .chip.selected`);
+  if (!selected) return null;
+  if (selected.dataset.val === 'other' && otherInputId) {
+    return document.getElementById(otherInputId)?.value.trim() || null;
+  }
+  return selected.dataset.val;
+}
+function setSelected(groupId, vals, otherInputId) {
+  if (!vals) return;
+  const arr = Array.isArray(vals) ? vals : [vals];
+  const knownVals = Array.from(document.querySelectorAll(`#${groupId} .chip:not(.chip-other-trigger)`)).map(c => c.dataset.val);
+  document.querySelectorAll(`#${groupId} .chip`).forEach(c => c.classList.remove('selected'));
+  let hasOther = false;
+  arr.forEach(v => {
+    const chip = document.querySelector(`#${groupId} .chip[data-val="${v}"]`);
+    if (chip) { chip.classList.add('selected'); }
+    else if (!knownVals.includes(v)) { hasOther = true; }
+  });
+  if (hasOther && otherInputId) {
+    const otherChip = document.querySelector(`#${groupId} .chip-other-trigger`);
+    if (otherChip) otherChip.classList.add('selected');
+    const wrap = document.getElementById(otherInputId + '-wrap');
+    if (wrap) wrap.classList.add('visible');
+    const inp = document.getElementById(otherInputId);
+    if (inp) inp.value = arr.filter(v => !knownVals.includes(v)).join('、');
+  }
+}
+
+// ════════ SCR-00b: プロファイル保存 ════════
+function saveProfile(fromModal) {
+  const nameEl = fromModal ? document.getElementById('edit-name') : document.getElementById('prof-name');
+  const name = nameEl.value.trim();
+  const errEl = fromModal ? null : document.getElementById('name-err');
+  if (!name) { if (errEl) errEl.classList.add('visible'); return; }
+  if (errEl) errEl.classList.remove('visible');
+
+  const pfx = fromModal ? 'edit-' : 'prof-';
+  const age = getSingleVal(pfx+'age-chips', pfx+'age-other');
+  const level = getSingleVal(pfx+'level-chips', null) || 'college';
+  const job = getSingleVal(pfx+'job-chips', pfx+'job-other');
+  const goalChips = getSelected(pfx+'goal-chips').filter(v=>v!=='other');
+  const goalFree = document.getElementById(pfx+'goal-free')?.value.trim() || null;
+  const hobbies = getSelected(pfx+'hobby-chips').filter(v=>v!=='other');
+  const hobbyFree = document.getElementById(pfx+'hobby-free')?.value.trim();
+  if (hobbyFree) hobbyFree.split(/[,、，]/).map(s=>s.trim()).filter(Boolean).forEach(h=>{ if(!hobbies.includes(h)) hobbies.push(h); });
+  const weakPoints = getSelected(pfx+'weak-chips');
+
+  const existing = LS.get(K.PROFILE) || {};
+  const profile = {
+    ...existing,
+    basic: { name, age, job },
+    level,
+    goalTags: goalChips,
+    goalFree,
+    hobbies,
+    weakPoints,
+    updatedAt: new Date().toISOString().slice(0,10),
+  };
+  LS.set(K.PROFILE, profile);
+  LS.set(K.LEVEL, level);
+
+  if (fromModal) {
+    closeProfileEdit();
+    renderProfileTab();
+    showToast('プロファイルを保存しました ✓');
+  } else {
+    showScreen('scr-main'); initCallScreen(); updateCostDisplay();
+  }
+}
+function skipProfile() {
+  LS.set(K.PROFILE, {
+    basic: { name: 'あなた' },
+    skipped: true,
+    updatedAt: new Date().toISOString().slice(0,10),
+  });
+  showScreen('scr-main'); initCallScreen(); updateCostDisplay();
+}
+
+// ════════ AUTO-LEARN（会話からの自動保存） ════════
+// Phase 2のAI会話実装後に呼ばれる公開API
+window.autoLearnFromChat = function(extractedInfo) {
+  // extractedInfoの例: { name:"太郎", hobby:"サッカー", job:"エンジニア", weakPoint:"発音" }
+  const profile = LS.get(K.PROFILE) || {};
+  const learned = LS.get(K.AUTO_LEARNED) || [];
+  const entries = [];
+
+  if (extractedInfo.name && !profile.basic?.name || profile.basic?.name === 'あなた') {
+    profile.basic = { ...profile.basic, name: extractedInfo.name };
+    entries.push({ key:'name', val: extractedInfo.name, label:'名前' });
+  }
+  if (extractedInfo.hobby) {
+    profile.hobbies = profile.hobbies || [];
+    if (!profile.hobbies.includes(extractedInfo.hobby)) {
+      profile.hobbies.push(extractedInfo.hobby);
+      entries.push({ key:'hobby', val: extractedInfo.hobby, label:'趣味' });
+    }
+  }
+  if (extractedInfo.job && !profile.basic?.job) {
+    profile.basic = { ...profile.basic, job: extractedInfo.job };
+    entries.push({ key:'job', val: extractedInfo.job, label:'職業' });
+  }
+  if (extractedInfo.weakPoint) {
+    profile.weakPoints = profile.weakPoints || [];
+    if (!profile.weakPoints.includes(extractedInfo.weakPoint)) {
+      profile.weakPoints.push(extractedInfo.weakPoint);
+      entries.push({ key:'weakPoint', val: extractedInfo.weakPoint, label:'苦手' });
+    }
+  }
+  if (extractedInfo.goal && !profile.goalFree) {
+    profile.goalFree = extractedInfo.goal;
+    entries.push({ key:'goal', val: extractedInfo.goal, label:'目標' });
+  }
+  if (extractedInfo.misc) {
+    // その他の情報はauto_learnedに追記
+    learned.push({ val: extractedInfo.misc, date: new Date().toISOString().slice(0,10) });
+  }
+
+  if (entries.length > 0) {
+    profile.updatedAt = new Date().toISOString().slice(0,10);
+    LS.set(K.PROFILE, profile);
+    LS.set(K.AUTO_LEARNED, learned);
+    const msg = entries.map(e => `${e.label}「${e.val}」`).join('、') + ' を覚えました';
+    showToast(msg);
+  }
+};
+
+// 会話から定期抽出するためのシステムプロンプト指示（Phase 2で使用）
+window.getProfileExtractionPrompt = function() {
+  return `After responding, if the user revealed any personal info (name, hobby, job, weak point in English, goal), 
+also output a JSON block: {"extract":{"name":"...","hobby":"...","job":"...","weakPoint":"...","goal":"...","misc":"..."}}
+Only include keys where info was actually revealed. Omit keys with no info.`;
+};
+
+// ════════ PROFILE TAB ════════
+function renderProfileTab() {
+  const profile = LS.get(K.PROFILE) || {};
+  const learned = LS.get(K.AUTO_LEARNED) || [];
+
+  // 基本情報
+  const basicItems = [];
+  if (profile.basic?.name) basicItems.push({key:'name', label:'名前', val:profile.basic.name});
+  if (profile.basic?.age)  basicItems.push({key:'age',  label:'年齢', val:profile.basic.age});
+  if (profile.basic?.job)  basicItems.push({key:'job',  label:'職業', val:profile.basic.job});
+  if (profile.level)       basicItems.push({key:'level',label:'レベル', val:levelLabel(profile.level)});
+  renderProfSection('basic', basicItems, true);
+
+  // 目標
+  const goalItems = [];
+  if (profile.goalTags?.length) goalItems.push({key:'goalTags', label:'目標タグ', val:profile.goalTags.join('・')});
+  if (profile.goalFree) goalItems.push({key:'goalFree', label:'詳細目標', val:profile.goalFree});
+  renderProfSection('goal', goalItems, true);
+
+  // 趣味
+  const hobbyItems = (profile.hobbies||[]).map((h,i)=>({key:'hobby_'+i, label:'趣味'+(i+1), val:h}));
+  renderProfSection('hobby', hobbyItems, true);
+
+  // 苦手
+  const weakItems = (profile.weakPoints||[]).map((w,i)=>({key:'weak_'+i, label:'苦手'+(i+1), val:w}));
+  renderProfSection('weak', weakItems, false);
+
+  // AIが覚えたこと
+  const autoItems = learned.map((a,i)=>({key:'auto_'+i, label:a.date, val:a.val}));
+  renderProfSection('auto', autoItems, false);
+
+  // api-info-disp: removed in simplified version
+
+}
+
+function renderProfSection(secId, items, canEdit) {
+  const body = document.getElementById('psec-'+secId+'-body');
+  if (!body) return;
+  if (!items.length) {
+    body.innerHTML = '<div class="prof-empty">まだ情報がありません</div>';
+    return;
+  }
+  body.innerHTML = items.map(item => `
+    <div class="prof-row" id="profrow-${item.key}">
+      <div class="prof-row-label">${item.label}</div>
+      <div class="prof-row-val" id="profval-${item.key}">${escHtml(item.val)}</div>
+      ${canEdit ? `<div class="prof-row-actions">
+        <button onclick="editProfItem('${item.key}','${escHtml(item.val)}')" title="編集"><i class="ti ti-pencil"></i></button>
+        <button class="del" onclick="deleteProfItem('${item.key}')" title="削除"><i class="ti ti-trash"></i></button>
+      </div>` : `<div class="prof-row-actions">
+        <button class="del" onclick="deleteProfItem('${item.key}')" title="削除"><i class="ti ti-trash"></i></button>
+      </div>`}
+    </div>`).join('');
+}
+
+function editProfItem(key, currentVal) {
+  const row = document.getElementById('profrow-' + key);
+  const valEl = document.getElementById('profval-' + key);
+  if (!row || !valEl) return;
+  // インライン編集UI
+  valEl.innerHTML = `
+    <div class="inline-edit-wrap">
+      <input class="form-input" id="inline-inp-${key}" value="${escHtml(currentVal)}" type="text">
+      <button class="inline-edit-save" onclick="saveInlineEdit('${key}')">保存</button>
+      <button class="inline-edit-cancel" onclick="renderProfileTab()">✕</button>
+    </div>`;
+  document.getElementById('inline-inp-' + key)?.focus();
+}
+
+function saveInlineEdit(key) {
+  const inp = document.getElementById('inline-inp-' + key);
+  const newVal = inp?.value.trim();
+  if (!newVal) return;
+  const profile = LS.get(K.PROFILE) || {};
+
+  if (key === 'name')      { profile.basic = {...profile.basic, name: newVal}; }
+  else if (key === 'age')  { profile.basic = {...profile.basic, age: newVal}; }
+  else if (key === 'job')  { profile.basic = {...profile.basic, job: newVal}; }
+  else if (key === 'level') { profile.level = newVal; LS.set(K.LEVEL, newVal); }
+  else if (key === 'goalFree') { profile.goalFree = newVal; }
+  else if (key.startsWith('hobby_')) {
+    const idx = parseInt(key.split('_')[1]);
+    if (profile.hobbies) profile.hobbies[idx] = newVal;
+  }
+  else if (key.startsWith('weak_')) {
+    const idx = parseInt(key.split('_')[1]);
+    if (profile.weakPoints) profile.weakPoints[idx] = newVal;
+  }
+  else if (key.startsWith('auto_')) {
+    const learned = LS.get(K.AUTO_LEARNED) || [];
+    const idx = parseInt(key.split('_')[1]);
+    if (learned[idx]) learned[idx].val = newVal;
+    LS.set(K.AUTO_LEARNED, learned);
+  }
+
+  profile.updatedAt = new Date().toISOString().slice(0,10);
+  LS.set(K.PROFILE, profile);
+  renderProfileTab();
+  showToast('更新しました ✓');
+}
+
+function deleteProfItem(key) {
+  if (!confirm('この項目を削除しますか？')) return;
+  const profile = LS.get(K.PROFILE) || {};
+
+  if (key === 'name')      { profile.basic = {...profile.basic, name: 'あなた'}; }
+  else if (key === 'age')  { profile.basic = {...profile.basic, age: null}; }
+  else if (key === 'job')  { profile.basic = {...profile.basic, job: null}; }
+  else if (key === 'level') { profile.level = null; }
+  else if (key === 'goalFree') { profile.goalFree = null; }
+  else if (key === 'goalTags') { profile.goalTags = []; }
+  else if (key.startsWith('hobby_')) {
+    const idx = parseInt(key.split('_')[1]);
+    profile.hobbies = (profile.hobbies||[]).filter((_,i)=>i!==idx);
+  }
+  else if (key.startsWith('weak_')) {
+    const idx = parseInt(key.split('_')[1]);
+    profile.weakPoints = (profile.weakPoints||[]).filter((_,i)=>i!==idx);
+  }
+  else if (key.startsWith('auto_')) {
+    const learned = LS.get(K.AUTO_LEARNED) || [];
+    const idx = parseInt(key.split('_')[1]);
+    learned.splice(idx,1);
+    LS.set(K.AUTO_LEARNED, learned);
+  }
+
+  profile.updatedAt = new Date().toISOString().slice(0,10);
+  LS.set(K.PROFILE, profile);
+  renderProfileTab();
+  showToast('削除しました');
+}
+
+// ─── セクション折り畳み ───
+function toggleSection(secId) {
+  const body = document.getElementById('psec-'+secId+'-body');
+  const icon = document.getElementById('psec-'+secId+'-icon');
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  if (icon) icon.style.transform = isOpen ? 'rotate(180deg)' : '';
+}
+
+// ─── 全画面モーダル編集 ───
+function openProfileEdit() {
+  const profile = LS.get(K.PROFILE) || {};
+  document.getElementById('edit-name').value = profile.basic?.name || '';
+  setSelected('edit-age-chips', profile.basic?.age ? [profile.basic.age] : [], 'edit-age-other');
+  setSelected('edit-level-chips', profile.level ? [profile.level] : ['college'], null);
+  setSelected('edit-job-chips', profile.basic?.job ? [profile.basic.job] : [], 'edit-job-other');
+  setSelected('edit-goal-chips', profile.goalTags || [], null);
+  document.getElementById('edit-goal-free').value = profile.goalFree || '';
+  setSelected('edit-hobby-chips', profile.hobbies || [], null);
+  document.getElementById('edit-hobby-free').value = '';
+  setSelected('edit-weak-chips', profile.weakPoints || [], null);
+  document.getElementById('profile-edit-modal').classList.add('open');
+}
+function closeProfileEdit() {
+  document.getElementById('profile-edit-modal').classList.remove('open');
+}
+function saveProfileEdit() { saveProfile(true); }
+
+
+
+
+
+function resetProfile() {
+  if (!confirm('プロファイルを初期化しますか？')) return;
+  LS.set(K.PROFILE, {basic:{name:'あなた'}, updatedAt:new Date().toISOString().slice(0,10)});
+  LS.set(K.AUTO_LEARNED, []);
+  renderProfileTab();
+  showToast('プロファイルを初期化しました');
+}
+
+const CHARACTERS = [
+  {
+    id:'claude_m', name:'Claude', gender:'male', emoji:'\u{1F393}',
+    title:'English Teacher', voiceLang:'en-US', voiceGender:'male',
+    desc:'Language Parent方式\nゆっくり・優しく・シンプル',
+    unlocked:true,
+    systemPrompt:(profile,level)=>buildTeacherPrompt(profile,level,'Claude','he/him','calm and encouraging male teacher'),
+  },
+  {
+    id:'claudia_f', name:'Claudia', gender:'female', emoji:'\u{1F469}\u200D\u{1F3EB}',
+    title:'English Teacher', voiceLang:'en-US', voiceGender:'female',
+    desc:'Language Parent方式\nゆっくり・優しく・シンプル',
+    unlocked:true,
+    systemPrompt:(profile,level)=>buildTeacherPrompt(profile,level,'Claudia','she/her','warm and encouraging female teacher'),
+  },
+];
+// ── システムプロンプト生成ヘルパー ──
+function buildTeacherPrompt(profile, level, name, pronouns, personality) {
+  const uname  = profile?.basic?.name || 'あなた';
+  const hobbies= (profile?.hobbies||[]).join(', ') || 'not specified';
+  const goal   = profile?.goalFree || (profile?.goalTags||[]).join(', ') || 'general English';
+  const weak   = (profile?.weakPoints||[]).join(', ') || 'not specified';
+  const job    = profile?.basic?.job || 'not specified';
+  return `You are ${name}, a ${personality} acting as a Language Parent for a Japanese learner named ${uname}.
+
+## Learner Profile
+Name: ${uname} | Job: ${job} | Level: ${level||'intermediate'}
+Hobbies: ${hobbies} | Goal: ${goal} | Weak points: ${weak}
+
+## Language Parent Rules (strictly follow all 4)
+1. English only. Short simple sentences (A1-A2 level max).
+2. NEVER directly correct errors. Naturally model the correct form in your reply.
+3. Echo back what you understood ("So you mean...?") to confirm understanding.
+4. Use vocabulary the learner already knows. Adapt to their level.
+
+## Additional rules
+- Be warm, encouraging, and patient.
+- Personalize conversation using the learner's profile naturally.
+- End every reply with ONE simple question.
+- Use emoji for visual communication when helpful.
+- If learner asks to speak slower/faster, include speedAdjust.
+
+## JSON Response (STRICT - return ONLY this JSON, no other text)
+{"english":"2-3 short sentences","japanese":"日本語訳","visual":{"type":"emoji|none","emoji":"絵文字","title":"ラベル","desc":"説明"},"encouragement":"Great! / Awesome! / You got it! など","speedAdjust":0,"hints":["hint1","hint2","hint3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
+}
+
+
+function getSpeed() { return parseFloat(LS.get(K.VOICE_SPEED) || 0.75); }
+function saveSpeed(v) { LS.set(K.VOICE_SPEED, v); }
+function applySpeed(v) {
+  var c = Math.min(1.5, Math.max(0.5, Math.round(parseFloat(v) * 20) / 20));
+  var sl = document.getElementById('speed-slider');
+  var lb = document.getElementById('speed-val');
+  if (sl) sl.value = c;
+  if (lb) lb.textContent = c.toFixed(2) + 'x';
+  saveSpeed(c); return c;
+}
+
+let _voiceMale   = null;
+let _voiceFemale = null;
+
+function cacheVoices() {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return false;
+  const femKw = ['samantha','zira','victoria','karen','moira','tessa','susan','ava','alice','fiona'];
+  const malKw = ['daniel','alex','david','thomas','rishi','lee','bruce','jorge'];
+  _voiceFemale = voices.find(v => v.lang.startsWith('en') && femKw.some(k => v.name.toLowerCase().includes(k)))
+              || voices.find(v => v.lang === 'en-US' && v.name.toLowerCase().includes('female'))
+              || voices.find(v => v.lang.startsWith('en'));
+  _voiceMale   = voices.find(v => v.lang.startsWith('en') && malKw.some(k => v.name.toLowerCase().includes(k)))
+              || voices.find(v => v.lang === 'en-US' && !v.name.toLowerCase().includes('female'))
+              || voices.find(v => v.lang.startsWith('en'));
+  return true;
+}
+// voices はブラウザ起動後に非同期ロードされる
+window.speechSynthesis.onvoiceschanged = () => { cacheVoices(); };
+
+
+function speakText(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utt  = new SpeechSynthesisUtterance(text);
+  const char = selectedChar || {};
+  utt.lang   = char.voiceLang   || 'en-US';
+  utt.rate   = getSpeed();
+  utt.pitch  = char.voiceGender === 'female' ? 1.1 : 0.95;
+
+  // 利用可能な音声から最適な声を選択
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length > 0) {
+    const lang   = utt.lang;
+    const gender = char.voiceGender || 'male';
+    // 性別キーワードで絞り込み
+    const femaleKeywords = ['female','woman','zira','samantha','victoria','karen','moira','tessa','fiona','veena','susan','allison','ava','alice','amelie'];
+    const maleKeywords   = ['male','man','daniel','alex','thomas','david','rishi','lee','bruce','diego','jorge','luca'];
+    const keywords = gender === 'female' ? femaleKeywords : maleKeywords;
+
+    // 言語一致 + 性別キーワード一致を優先
+    let best = voices.find(v =>
+      v.lang.startsWith(lang.slice(0,2)) &&
+      keywords.some(k => v.name.toLowerCase().includes(k))
+    );
+    // 言語一致のみ（性別不問）
+    if (!best) best = voices.find(v => v.lang.startsWith(lang.slice(0,2)));
+    // en-US フォールバック
+    if (!best) best = voices.find(v => v.lang === 'en-US');
+    if (best) utt.voice = best;
+  }
+
+  window.speechSynthesis.speak(utt);
+}
+
+// ── マイク ──
+
+var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = true;
+var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
+var isLoading = false, callStarted = false;
+var recognition = null, micActive = false, micPermitted = null;
+var _replyTimer = null, _waitingReply = false;
+var REPLY_WAIT_MS = 35000;
+var MODEL_PRICES = {
+  'gemini-2.5-flash':      {input:0.15, output:0.60},
+  'gemini-2.5-flash-lite': {input:0.10, output:0.40},
+};
+var SVG_MIC_ON  = '<svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+var SVG_MIC_OFF = '<svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+var SVG_CAP_ON  = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+var SVG_CAP_OFF = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="4" y1="4" x2="20" y2="20"/></svg>';
+var SVG_VIS_ON  = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+var SVG_VIS_OFF = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>';
+var SVG_SPK_ON  = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+var SVG_SPK_OFF = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
+
+function resetReplyTimer() {
+  if (_replyTimer) clearTimeout(_replyTimer);
+  _waitingReply = false; _replyTimer = null;
+}
+function startReplyTimer() {
+  resetReplyTimer(); _waitingReply = true;
+  _replyTimer = setTimeout(function() { if (callStarted && !isLoading && _waitingReply) teacherProactiveMessage(); }, REPLY_WAIT_MS);
+}
+
+function initCallScreen() {
+  var saved = LS.get(K.MIC_PERMITTED);
+  if (saved === true)  micPermitted = true;
+  if (saved === false) micPermitted = false;
+  renderCharCards(); updateCallCostDisplay(); applySpeed(getSpeed());
+  initSpeechRecognition(); updateCapToggleUI(); updateCaptionCycleUI(); updateMicUI();
+}
+
+function renderCharCards() {
+  var html = CHARACTERS.map(function(c) {
+    var gt = c.gender === 'male'
+      ? '<span class="gender-tag tag-m">♂ 男性</span>'
+      : '<span class="gender-tag tag-f">♀ 女性</span>';
+    var isSelected = selectedChar && selectedChar.id === c.id ? ' selected' : '';
+    return '<div class="char-card' + isSelected + '" id="charcard-' + c.id + '" data-charid="' + c.id + '" onclick="selectChar(this.dataset.charid)">' +
+      '<div class="char-avatar">' + c.emoji + '</div>' +
+      '<div class="char-name">' + c.name + gt + '</div>' +
+      '<div class="char-voice-tag">' + c.voiceLang + ' · ' + (c.voiceGender === 'female' ? '女性' : '男性') + '音声</div>' +
+      '<div style="font-size:10px;color:var(--text3);margin-top:3px;white-space:pre-line">' + c.desc + '</div></div>';
+  }).join('');
+  document.getElementById('char-cards').innerHTML = html;
+}
+
+function selectChar(id) {
+  selectedChar = null;
+  for (var i = 0; i < CHARACTERS.length; i++) { if (CHARACTERS[i].id === id) { selectedChar = CHARACTERS[i]; break; } }
+  document.querySelectorAll('.char-card').forEach(function(c) { c.classList.remove('selected'); });
+  var el = document.getElementById('charcard-' + id);
+  if (el) el.classList.add('selected');
+  document.getElementById('char-start-btn').disabled = false;
+}
+
+function startCall() {
+  if (!selectedChar) return;
+  document.getElementById('char-select-overlay').style.display = 'none';
+  document.getElementById('call-badge').style.display = '';
+  callStarted = true;
+  document.getElementById('ai-avatar-emoji').textContent = selectedChar.emoji;
+  document.getElementById('ai-name-tag').textContent = selectedChar.name + ' — ' + selectedChar.title;
+  chatHistory = []; document.getElementById('caption-body').innerHTML = '';
+  setHintChips(['Hello! Nice to meet you!', 'My name is...', 'I like...', "I'm from Japan"]);
+  micMuted = true; updateMicUI(); resetReplyTimer(); sendInitialGreeting();
+  // ★ recognitionはここでは起動しない。ユーザーが「マイクON」を押した時のみ起動する。
+  //   （通話開始時に自動起動すると、ページごとに毎回許可ダイアログが出る原因になる）
+}
+
+async function sendInitialGreeting() {
+  var profile = LS.get(K.PROFILE) || {};
+  var name = profile.basic && profile.basic.name ? profile.basic.name : '';
+  var en = (name && name !== 'あなた')
+    ? 'Hello ' + name + '! Great to meet you! How are you today?'
+    : "Hello! I'm so happy to talk with you today! How are you?";
+  var jp = (name && name !== 'あなた')
+    ? 'こんにちは、' + name + 'さん！今日の調子はどうですか？'
+    : 'こんにちは！今日お話しできてとても嬉しいです！調子はいかがですか？';
+  addCaption('ai', en, jp, null);
+  showVisualAssist({type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'});
+  chatHistory.push({role:'model', parts:[{text: JSON.stringify({english:en, japanese:jp})}]});
+  if (voiceEnabled) speakText(en);
+  startReplyTimer();
+}
+
+function endCall() {
+  if (!confirm('通話を終了しますか？')) return;
+  callStarted = false; stopRecognition();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  resetReplyTimer(); chatHistory = []; selectedChar = null;
+  document.getElementById('char-select-overlay').style.display = '';
+  document.getElementById('call-badge').style.display = 'none';
+  document.getElementById('caption-body').innerHTML =
+    '<div style="text-align:center;padding:20px 0;font-size:12px;color:var(--text3)">通話が始まると字幕がここに表示されます</div>';
+  document.getElementById('visual-assist').classList.remove('show');
+  renderCharCards(); document.getElementById('char-start-btn').disabled = true;
+  LS.set(K.SESSION_COUNT, (LS.get(K.SESSION_COUNT) || 0) + 1);
+}
+
+async function sendMessage() {
+  var inp  = document.getElementById('chat-input');
+  var text = inp.value.trim();
+  if (!text || isLoading || !callStarted) return;
+  inp.value = ''; autoResize(inp);
+  addCaption('me', text, null, null); resetReplyTimer();
+  isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
+  var apiKey = LS.get(K.API_KEY);
+  var model  = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+  var profile = LS.get(K.PROFILE) || {};
+  var level   = LS.get(K.LEVEL)   || 'college';
+  chatHistory.push({role:'user', parts:[{text:text}]});
+  try {
+    var body = {
+      system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level)}]},
+      contents: chatHistory,
+      generationConfig: {temperature:0.8, maxOutputTokens:600}
+    };
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    removeTypingFromCaption();
+    if (!res.ok) {
+      var errData = await res.json().catch(function() { return {}; });
+      if (res.status === 429 && (LS.get(K.TIER) || 'paid') === 'free') {
+        addCaption('ai', 'Oh! Rate limit. Retrying in 5 seconds...', '5秒後に自動リトライします。', null);
+        setTimeout(function() { chatHistory.pop(); inp.value = text; isLoading = false; document.getElementById('send-btn').disabled = false; sendMessage(); }, 5000);
+        return;
+      }
+      throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status + (res.status===429?' RESOURCE_EXHAUSTED':'')));
+    }
+    var data    = await res.json();
+    var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
+    var usage   = data.usageMetadata || {};
+    updateTokenCost(usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, model);
+    chatHistory.push({role:'model', parts:[{text: rawText}]});
+    var parsed;
+    try { parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim()); }
+    catch (pe) { parsed = {english:rawText, japanese:'', visual:null, speedAdjust:0, hints:[], extract:{}}; }
+    if (parsed.speedAdjust && parsed.speedAdjust !== 0) {
+      var ns = applySpeed(getSpeed() + parsed.speedAdjust);
+      showToast('速度を' + ns.toFixed(2) + 'xに調整');
+    }
+    addCaption('ai', parsed.english, parsed.japanese, null);
+    if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
+    if (parsed.visual) showVisualAssist(parsed.visual);
+    if (voiceEnabled && parsed.english) speakText(parsed.english);
+    if (parsed.extract && Object.keys(parsed.extract).some(function(k) { return parsed.extract[k]; })) window.autoLearnFromChat(parsed.extract);
+    startReplyTimer();
+  } catch(e) {
+    removeTypingFromCaption();
+    var friendly = explainApiError(e.message);
+    addCaption('ai', '⚠️ ' + friendly.en, friendly.jp, null);
+    showToast('エラー: ' + friendly.short, 6000);
+  }
+  isLoading = false; document.getElementById('send-btn').disabled = false;
+  document.getElementById('chat-input').focus();
+}
+
+// APIエラーメッセージを分かりやすく変換
+function explainApiError(msg) {
+  msg = msg || '';
+  if (/API key not valid|API_KEY_INVALID/i.test(msg)) {
+    return { en:'Invalid API key. Please check your settings.', jp:'APIキーが無効です。設定タブでキーを確認してください。', short:'APIキーが無効です' };
+  }
+  if (/quota|RESOURCE_EXHAUSTED|429/i.test(msg)) {
+    return { en:'API quota exceeded. This may be a free tier limit.', jp:'APIの利用上限に達しました。無料Tierの制限の可能性があります。しばらく待つか、有料Tierへの切替をご検討ください。', short:'API利用上限に達しました（無料Tierの制限の可能性）' };
+  }
+  if (/PERMISSION_DENIED|403/i.test(msg)) {
+    return { en:'Permission denied. Check your API key permissions.', jp:'アクセス権限がありません。APIキーの権限設定を確認してください。', short:'アクセス権限エラー' };
+  }
+  if (/SAFETY|blocked/i.test(msg)) {
+    return { en:'Content was blocked by safety filters.', jp:'内容が安全フィルターによりブロックされました。', short:'安全フィルターによるブロック' };
+  }
+  if (/Failed to fetch|NetworkError|ERR_INTERNET/i.test(msg)) {
+    return { en:'Network error. Please check your internet connection.', jp:'ネットワークエラーです。インターネット接続を確認してください。', short:'ネットワークエラー' };
+  }
+  if (/HTTP 500|HTTP 503|UNAVAILABLE/i.test(msg)) {
+    return { en:'Gemini server is temporarily unavailable. Please try again.', jp:'Geminiサーバーが一時的に利用できません。しばらくしてからもう一度お試しください。', short:'サーバー一時エラー' };
+  }
+  // フォールバック：原文をそのまま表示
+  return { en:'An error occurred: ' + msg, jp:'エラーが発生しました: ' + msg, short: msg.slice(0,60) };
+}
+
+async function teacherProactiveMessage() {
+  if (!callStarted || isLoading) return;
+  _waitingReply = false; isLoading = true; document.getElementById('send-btn').disabled = true;
+  showTypingInCaption();
+  var apiKey = LS.get(K.API_KEY);
+  var model  = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+  var profile = LS.get(K.PROFILE) || {};
+  var level   = LS.get(K.LEVEL)   || 'college';
+  var hist = chatHistory.concat([{role:'user', parts:[{text:'[System: waitingForReply: true. Gently follow up or change topic.]'}]}]);
+  try {
+    var body = {
+      system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level)}]},
+      contents: hist,
+      generationConfig: {temperature:0.9, maxOutputTokens:400}
+    };
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    removeTypingFromCaption();
+    if (!res.ok) { isLoading = false; document.getElementById('send-btn').disabled = false; return; }
+    var data    = await res.json();
+    var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
+    var um = data.usageMetadata || {};
+    updateTokenCost(um.promptTokenCount || 0, um.candidatesTokenCount || 0, model);
+    chatHistory.push({role:'model', parts:[{text: rawText}]});
+    var parsed;
+    try { parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim()); }
+    catch (pe) { parsed = {english:rawText, japanese:'', visual:null, speedAdjust:0, hints:[]}; }
+    if (parsed.speedAdjust && parsed.speedAdjust !== 0) applySpeed(getSpeed() + parsed.speedAdjust);
+    addCaption('ai', parsed.english, parsed.japanese, null);
+    if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
+    if (parsed.visual) showVisualAssist(parsed.visual);
+    if (voiceEnabled && parsed.english) speakText(parsed.english);
+    startReplyTimer();
+  } catch(e) {
+    removeTypingFromCaption();
+    var friendly = explainApiError(e.message);
+    showToast('エラー: ' + friendly.short, 6000);
+  }
+  isLoading = false; document.getElementById('send-btn').disabled = false;
+}
+
+function addCaption(role, en, jp, _correction) {
+  var body = document.getElementById('caption-body');
+  var old = document.getElementById('cap-typing');
+  if (old) old.remove();
+  var div = document.createElement('div');
+  div.className = 'cap-entry ' + role;
+  var who = role === 'ai'
+    ? '<div class="cap-who">🤖 ' + (selectedChar ? selectedChar.name : '先生') + '</div>'
+    : '<div class="cap-who">🙋 あなた</div>';
+  var enH = (capEnEnabled || role === 'me') ? '<div class="cap-en">' + escHtml(en || '') + '</div>' : '';
+  var jpH = jp ? '<div class="cap-jp' + (capJpEnabled ? ' show' : '') + '">' + escHtml(jp) + '</div>' : '';
+  div.innerHTML = who + enH + jpH;
+  body.appendChild(div); body.scrollTop = body.scrollHeight;
+  if (role === 'ai') {
+    var av = document.getElementById('ai-avatar-circle');
+    if (av) { av.classList.add('speaking'); setTimeout(function() { av.classList.remove('speaking'); }, 2500); }
+  }
+}
+function showTypingInCaption() {
+  var body = document.getElementById('caption-body');
+  var div = document.createElement('div'); div.className = 'cap-entry ai'; div.id = 'cap-typing';
+  div.innerHTML = '<div class="cap-who">🤖 ' + (selectedChar ? selectedChar.name : '先生') + '</div>' +
+    '<div class="cap-en"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+  body.appendChild(div); body.scrollTop = body.scrollHeight;
+  var av = document.getElementById('ai-avatar-circle');
+  if (av) av.classList.add('speaking');
+}
+function removeTypingFromCaption() {
+  var el = document.getElementById('cap-typing'); if (el) el.remove();
+  var av = document.getElementById('ai-avatar-circle'); if (av) av.classList.remove('speaking');
+}
+
+function toggleCapEn() {
+  capEnEnabled = !capEnEnabled;
+  document.getElementById('toggle-en').classList.toggle('on', capEnEnabled);
+  document.querySelectorAll('.cap-entry.ai .cap-en').forEach(function(el) { el.style.display = capEnEnabled ? '' : 'none'; });
+  syncCapCycle();
+}
+function toggleCapJp() {
+  capJpEnabled = !capJpEnabled;
+  document.getElementById('toggle-jp').classList.toggle('on', capJpEnabled);
+  document.querySelectorAll('.cap-jp').forEach(function(el) { el.classList.toggle('show', capJpEnabled); });
+  syncCapCycle();
+}
+function syncCapCycle() {
+  capCycleMode = (!capEnEnabled && !capJpEnabled) ? 2 : (capEnEnabled && capJpEnabled) ? 1 : 0;
+  updateCaptionCycleUI();
+}
+function updateCapToggleUI() {
+  var te = document.getElementById('toggle-en'); if (te) te.classList.toggle('on', capEnEnabled);
+  var tj = document.getElementById('toggle-jp'); if (tj) tj.classList.toggle('on', capJpEnabled);
+}
+function cycleCaption() {
+  capCycleMode = (capCycleMode + 1) % 3;
+  if (capCycleMode === 0) { capEnEnabled = true;  capJpEnabled = false; }
+  else if (capCycleMode === 1) { capEnEnabled = true; capJpEnabled = true; }
+  else { capEnEnabled = false; capJpEnabled = false; }
+  updateCapToggleUI();
+  document.querySelectorAll('.cap-entry.ai .cap-en').forEach(function(el) { el.style.display = capEnEnabled ? '' : 'none'; });
+  document.querySelectorAll('.cap-jp').forEach(function(el) { el.classList.toggle('show', capJpEnabled); });
+  updateCaptionCycleUI();
+}
+function updateCaptionCycleUI() {
+  var btn = document.getElementById('btn-caption');
+  var lbl = document.getElementById('caption-label');
+  var wrp = document.getElementById('caption-icon-wrap');
+  var sid = document.getElementById('caption-side');
+  if (!btn) return;
+  if (!capEnEnabled && !capJpEnabled) {
+    btn.classList.remove('on'); if (lbl) lbl.textContent = '字幕OFF';
+    if (wrp) wrp.innerHTML = SVG_CAP_OFF; if (sid) sid.classList.add('hidden');
+  } else {
+    btn.classList.add('on'); if (wrp) wrp.innerHTML = SVG_CAP_ON;
+    if (sid) sid.classList.remove('hidden');
+    if (lbl) lbl.textContent = capJpEnabled ? 'EN+JP' : 'EN字幕';
+  }
+}
+
+function showVisualAssist(v) {
+  var el = document.getElementById('visual-assist');
+  if (!v || v.type === 'none' || !visualEnabled) { el.classList.remove('show'); return; }
+  document.getElementById('visual-emoji').textContent = v.emoji || '';
+  document.getElementById('visual-title').textContent = v.title || '';
+  document.getElementById('visual-desc').textContent  = v.desc  || '';
+  el.classList.add('show'); setTimeout(function() { el.classList.remove('show'); }, 6000);
+}
+function toggleVisual() {
+  visualEnabled = !visualEnabled;
+  var btn = document.getElementById('btn-visual');
+  var wrp = document.getElementById('visual-icon-wrap');
+  btn.classList.toggle('on', visualEnabled);
+  if (wrp) wrp.innerHTML = visualEnabled ? SVG_VIS_ON : SVG_VIS_OFF;
+  if (!visualEnabled) document.getElementById('visual-assist').classList.remove('show');
+}
+function toggleVolume() {
+  voiceEnabled = !voiceEnabled;
+  var btn = document.getElementById('btn-volume');
+  var wrp = document.getElementById('vol-icon-wrap');
+  btn.classList.toggle('on', voiceEnabled);
+  if (wrp) wrp.innerHTML = voiceEnabled ? SVG_SPK_ON : SVG_SPK_OFF;
+  if (!voiceEnabled && window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+function initSpeechRecognition() {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  recognition = new SR();
+  recognition.lang = 'en-US'; recognition.interimResults = true;
+  // ★ continuous=false にする。1回の発話で自動終了させ、
+  //   次の発話はonendのタイミングで「ミュートでなければ即座に再start」する。
+  //   ブラウザの許可状態（マイクアイコンが赤色のまま）は維持されるため、
+  //   許可ダイアログは初回の1回だけで済む。
+  recognition.continuous = false;
+  recognition.onstart = function() {
+    micActive = true;
+    if (micPermitted !== true) { micPermitted = true; LS.set(K.MIC_PERMITTED, true); }
+    if (!micMuted) document.getElementById('mic-indicator').classList.add('show');
+  };
+  recognition.onend = function() {
+    micActive = false; document.getElementById('mic-indicator').classList.remove('show');
+    // ★ ミュートがOFF（マイクON状態）の間だけ、間を空けずに次のセッションを開始する。
+    //   これにより「会話が続く限りマイクは聞き続ける」体験を維持しつつ、
+    //   許可ダイアログの再発生を防ぐ（同一ページ内なら許可は保持されるため）。
+    if (callStarted && !micMuted) {
+      try { recognition.start(); } catch(e) {}
+    }
+  };
+  recognition.onerror = function(e) {
+    document.getElementById('mic-indicator').classList.remove('show');
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      micActive = false; micMuted = true; micPermitted = false;
+      LS.set(K.MIC_PERMITTED, false); updateMicUI();
+      showToast('マイクへのアクセスが拒否されました', 6000);
+    }
+  };
+  recognition.onresult = function(e) {
+    if (micMuted) return;
+    var ft = '';
+    for (var i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) ft += e.results[i][0].transcript; }
+    ft = ft.trim();
+    if (ft) { var inp = document.getElementById('chat-input'); inp.value = ft; autoResize(inp); sendMessage(); }
+  };
+}
+function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
+function stopRecognition() {
+  if (!recognition) return; micActive = false;
+  document.getElementById('mic-indicator').classList.remove('show');
+  try { recognition.abort(); } catch(e) {}
+}
+function toggleMic() {
+  if (micPermitted === false) { showToast('アドレスバー左の🔒からマイクを許可してください', 6000); return; }
+  if (!recognition) { showToast('このブラウザは音声認識に対応していません', 4000); return; }
+  if (micMuted) {
+    micMuted = false; updateMicUI();
+    if (callStarted) startRecognition();
+    showToast('マイク ON 🎤');
+  } else {
+    micMuted = true; updateMicUI();
+    document.getElementById('mic-indicator').classList.remove('show');
+    showToast('ミュートにしました 🔇');
+    // ミュート時は完全に停止する（バックグラウンドで動かし続けない）
+    stopRecognition();
+  }
+}
+function updateMicUI() {
+  var btn  = document.getElementById('btn-mic');
+  var wrp  = document.getElementById('mic-icon-wrap');
+  var lbl  = document.getElementById('mic-label');
+  var self = document.getElementById('self-area');
+  if (micMuted) {
+    if (btn) { btn.classList.remove('on'); btn.classList.add('muted-btn'); }
+    if (wrp) wrp.innerHTML = SVG_MIC_OFF; if (lbl) lbl.textContent = 'ミュート';
+    if (self) { self.classList.remove('mic-on'); self.classList.add('mic-off'); }
+  } else {
+    if (btn) { btn.classList.add('on'); btn.classList.remove('muted-btn'); }
+    if (wrp) wrp.innerHTML = SVG_MIC_ON; if (lbl) lbl.textContent = 'マイク ON';
+    if (self) { self.classList.add('mic-on'); self.classList.remove('mic-off'); }
+  }
+}
+
+function updateTokenCost(inTok, outTok, model) {
+  var isFree = (LS.get(K.TIER) || 'paid') === 'free';
+  var tt   = LS.get(K.TOKENS_TODAY)  || {input:0, output:0};
+  var ttot = LS.get(K.TOKENS_TOTAL)  || {input:0, output:0};
+  LS.set(K.TOKENS_TODAY,  {input: tt.input   + inTok, output: tt.output   + outTok});
+  LS.set(K.TOKENS_TOTAL,  {input: ttot.input + inTok, output: ttot.output + outTok});
+  if (!isFree) {
+    var prices = MODEL_PRICES[model] || MODEL_PRICES['gemini-2.5-flash-lite'];
+    var cost   = (inTok / 1e6) * prices.input + (outTok / 1e6) * prices.output;
+    LS.set(K.COST_TODAY,   (LS.get(K.COST_TODAY)   || 0) + cost);
+    LS.set(K.COST_TOTAL,   (LS.get(K.COST_TOTAL)   || 0) + cost);
+    LS.set(K.COST_MONTHLY, (LS.get(K.COST_MONTHLY) || 0) + cost);
+    if ((LS.get(K.COST_MONTHLY) || 0) >= (LS.get(K.MONTHLY_LIMIT) || 5)) showToast('⚠ 月額上限に達しました！', 5000);
+  }
+  updateCallCostDisplay(); updateCostDisplay();
+}
+function setHintChips(hints) {
+  document.getElementById('input-hints').innerHTML = hints.map(function(h) {
+    return '<span class="input-hint-chip" onclick="useHint(\'' + h.replace(/'/g, "&#39;") + '\')">' + h + '</span>';
+  }).join('');
+}
+function useHint(text) { var inp = document.getElementById('chat-input'); inp.value = text; inp.focus(); autoResize(inp); }
+function chatKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 80) + 'px'; }
+</script>
+</body>
+</html>
