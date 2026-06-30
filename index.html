@@ -1600,17 +1600,21 @@ function initSpeechRecognition() {
     micActive = true;
     if (micPermitted !== true) { micPermitted = true; LS.set(K.MIC_PERMITTED, true); }
     if (!micMuted) document.getElementById('mic-indicator').classList.add('show');
+    console.log('[mic] onstart @', new Date().toLocaleTimeString());
   };
   recognition.onend = function() {
     micActive = false; document.getElementById('mic-indicator').classList.remove('show');
+    console.log('[mic] onend @', new Date().toLocaleTimeString(), 'callStarted:', callStarted, 'micMuted:', micMuted);
     // continuous=true でも、長い無音やネットワーク要因でブラウザ側が自発的に
     // セッションを終了させることがあるため、安全網として再startは残しておく。
     if (callStarted && !micMuted) {
-      try { recognition.start(); } catch(e) {}
+      try { recognition.start(); console.log('[mic] restart issued'); }
+      catch(e) { console.log('[mic] restart FAILED:', e.name, e.message); }
     }
   };
   recognition.onerror = function(e) {
     document.getElementById('mic-indicator').classList.remove('show');
+    console.log('[mic] onerror @', new Date().toLocaleTimeString(), 'error:', e.error);
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       micActive = false; micMuted = true; micPermitted = false;
       LS.set(K.MIC_PERMITTED, false); updateMicUI();
@@ -1618,6 +1622,7 @@ function initSpeechRecognition() {
     }
   };
   recognition.onresult = function(e) {
+    console.log('[mic] onresult @', new Date().toLocaleTimeString(), 'resultIndex:', e.resultIndex, 'isFinal:', e.results[e.results.length-1] && e.results[e.results.length-1].isFinal);
     if (micMuted) return;
     var ft = '';
     for (var i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) ft += e.results[i][0].transcript; }
