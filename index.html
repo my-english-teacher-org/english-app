@@ -166,9 +166,9 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .call-badge{position:absolute;top:8px;right:8px;z-index:20;background:rgba(239,68,68,.85);border-radius:20px;padding:2px 9px;font-size:10px;color:#fff;font-weight:500;display:flex;align-items:center;gap:4px}
 .rec-dot{width:5px;height:5px;border-radius:50%;background:#fff;animation:blink 1s infinite}
-.face-help-btn{position:absolute;top:8px;left:8px;z-index:20;width:26px;height:26px;border-radius:50%;background:rgba(22,44,74,.85);border:1px solid var(--border2);color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font-b);cursor:pointer;display:flex;align-items:center;justify-content:center}
-.face-help-btn:hover{background:var(--surface2);color:var(--text)}
-.face-volume-btn{position:absolute;top:38px;right:8px;z-index:20;width:26px;height:26px;border-radius:50%;background:rgba(22,44,74,.85);border:1px solid var(--border2);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.topbar-help-btn{width:26px;height:26px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font-b);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.topbar-help-btn:hover{background:var(--surface1);color:var(--text)}
+.face-volume-btn{position:absolute;top:44px;right:8px;z-index:20;width:46px;height:46px;border-radius:50%;background:rgba(22,44,74,.85);border:1px solid var(--border2);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .face-volume-btn.on{border-color:var(--teal2)}
 .call-cost span{color:var(--teal2);font-weight:500}
 .self-area{position:absolute;bottom:8px;right:8px;z-index:15;width:58px;height:44px;border-radius:7px;background:var(--surface2);border:2px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:20px}
@@ -371,7 +371,10 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
       <div class="topbar-logo">AI</div>
       <span class="topbar-title">English AI Teacher</span>
     </div>
-    <div class="cost-badge"><span id="cost-today-disp">$0.0000</span></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="cost-badge"><span id="cost-today-disp">$0.0000</span></div>
+      <button class="topbar-help-btn" onclick="openHelpModal()" title="操作ガイド" aria-label="操作ガイド">?</button>
+    </div>
   </div>
 
   <div class="modal-overlay nav-menu-overlay" id="nav-menu-overlay" onclick="if(event.target===this) closeNavMenu()">
@@ -400,8 +403,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
           <div class="ai-face-area">
             <div class="ai-face-bg"></div>
             <div class="call-badge" id="call-badge" style="display:none"><span class="rec-dot"></span> 通話中</div>
-            <button class="face-help-btn" onclick="openHelpModal()" title="操作ガイド" aria-label="操作ガイド">?</button>
-            <button class="face-volume-btn on" id="btn-volume" onclick="toggleVolume()" title="先生の声の読み上げをON/OFF" aria-label="AI音声 ON/OFF"><span id="vol-icon-wrap"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></span></button>
+            <button class="face-volume-btn on" id="btn-volume" onclick="toggleVolume()" title="先生の声の読み上げをON/OFF" aria-label="AI音声 ON/OFF"><span id="vol-icon-wrap"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></span></button>
             <div class="visual-assist" id="visual-assist">
               <div class="visual-emoji" id="visual-emoji"></div>
               <div class="visual-caption"><strong id="visual-title"></strong><span id="visual-desc"></span></div>
@@ -1397,8 +1399,8 @@ var SVG_CAP_ON  = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" f
 var SVG_CAP_OFF = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="4" y1="4" x2="20" y2="20"/></svg>';
 var SVG_VIS_ON  = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
 var SVG_VIS_OFF = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>';
-var SVG_SPK_ON  = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
-var SVG_SPK_OFF = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
+var SVG_SPK_ON  = '<svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+var SVG_SPK_OFF = '<svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5B7FA8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
 
 function resetReplyTimer() {
   if (_replyTimer) clearTimeout(_replyTimer);
