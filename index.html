@@ -166,8 +166,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .call-badge{position:absolute;top:8px;right:8px;z-index:20;background:rgba(239,68,68,.85);border-radius:20px;padding:2px 9px;font-size:10px;color:#fff;font-weight:500;display:flex;align-items:center;gap:4px}
 .rec-dot{width:5px;height:5px;border-radius:50%;background:#fff;animation:blink 1s infinite}
-.call-cost{position:absolute;top:8px;left:8px;z-index:20;background:rgba(22,44,74,.8);border:1px solid var(--border);border-radius:20px;padding:2px 9px;font-size:10px;color:var(--text3)}
-.face-help-btn{position:absolute;top:38px;left:8px;z-index:20;width:26px;height:26px;border-radius:50%;background:rgba(22,44,74,.85);border:1px solid var(--border2);color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font-b);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.face-help-btn{position:absolute;top:8px;left:8px;z-index:20;width:26px;height:26px;border-radius:50%;background:rgba(22,44,74,.85);border:1px solid var(--border2);color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font-b);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .face-help-btn:hover{background:var(--surface2);color:var(--text)}
 .face-volume-btn{position:absolute;top:38px;right:8px;z-index:20;width:26px;height:26px;border-radius:50%;background:rgba(22,44,74,.85);border:1px solid var(--border2);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .face-volume-btn.on{border-color:var(--teal2)}
@@ -401,7 +400,6 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
           <div class="ai-face-area">
             <div class="ai-face-bg"></div>
             <div class="call-badge" id="call-badge" style="display:none"><span class="rec-dot"></span> 通話中</div>
-            <div class="call-cost">今日 <span id="call-cost-val">$0.0000</span></div>
             <button class="face-help-btn" onclick="openHelpModal()" title="操作ガイド" aria-label="操作ガイド">?</button>
             <button class="face-volume-btn on" id="btn-volume" onclick="toggleVolume()" title="先生の声の読み上げをON/OFF" aria-label="AI音声 ON/OFF"><span id="vol-icon-wrap"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#12B890" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></span></button>
             <div class="visual-assist" id="visual-assist">
@@ -862,13 +860,7 @@ function updateCostDisplay() {
   var isFree = (LS.get(K.TIER) || 'paid') === 'free';
   var el = document.getElementById('cost-today-disp');
   if (!el) return;
-  if (isFree) { el.textContent = '無料'; el.style.color = 'var(--teal2)'; }
-  else { el.textContent = '$' + (LS.get(K.COST_TODAY) || 0).toFixed(4); el.style.color = ''; }
-}
-function updateCallCostDisplay() {
-  var el = document.getElementById('call-cost-val');
-  if (!el) return;
-  if ((LS.get(K.TIER) || 'paid') === 'free') { el.textContent = '無料'; el.style.color = 'var(--teal2)'; }
+  if (isFree) { el.textContent = '無料版AI'; el.style.color = 'var(--teal2)'; }
   else { el.textContent = '$' + (LS.get(K.COST_TODAY) || 0).toFixed(4); el.style.color = ''; }
 }
 
@@ -1421,7 +1413,7 @@ function initCallScreen() {
   var saved = LS.get(K.MIC_PERMITTED);
   if (saved === true)  micPermitted = true;
   if (saved === false) micPermitted = false;
-  renderCharCards(); updateCallCostDisplay(); applySpeed(getSpeed());
+  renderCharCards(); updateCostDisplay(); applySpeed(getSpeed());
   initSpeechRecognition(); updateCapToggleUI(); updateCaptionCycleUI(); updateMicUI();
 }
 
@@ -1962,7 +1954,7 @@ function updateTokenCost(inTok, outTok, model) {
     LS.set(K.COST_MONTHLY, (LS.get(K.COST_MONTHLY) || 0) + cost);
     if ((LS.get(K.COST_MONTHLY) || 0) >= (LS.get(K.MONTHLY_LIMIT) || 5)) showToast('⚠ 月額上限に達しました！', 5000);
   }
-  updateCallCostDisplay(); updateCostDisplay();
+  updateCostDisplay();
 }
 function setHintChips(hints) {
   document.getElementById('input-hints').innerHTML = hints.map(function(h) {
