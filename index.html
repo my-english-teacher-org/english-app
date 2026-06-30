@@ -1262,9 +1262,10 @@ ${elicitBlock}${memoryBlock}
 - End every reply with ONE simple question.
 - Use emoji for visual communication when helpful.
 - If learner asks to speak slower/faster, include speedAdjust.
+- Keep every field SHORT. Do not pad your answer — brevity makes you respond faster, which matters a lot for a live voice conversation.
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
-{"english":"2-3 short sentences","japanese":"日本語訳","visual":{"type":"emoji|none","emoji":"絵文字","title":"ラベル","desc":"説明"},"encouragement":"Great! / Awesome! / You got it! など","speedAdjust":0,"hints":["hint1","hint2","hint3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
+{"english":"2-3 short sentences","japanese":"日本語訳","visual":{"type":"emoji|none","emoji":"絵文字","title":"ラベル(3-6文字)","desc":"説明(10-15文字程度)"},"speedAdjust":0,"hints":["hint1","hint2","hint3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
 }
 
 
@@ -1470,10 +1471,20 @@ async function sendInitialGreeting() {
       ? 'こんにちは、' + name + 'さん！今日の調子はどうですか？'
       : 'こんにちは！今日お話しできてとても嬉しいです！調子はいかがですか？';
     addCaption('ai', en, jp, null);
-    showVisualAssist({type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'});
+    showVisualAssist(fallbackVisual());
     chatHistory.push({role:'model', parts:[{text: JSON.stringify({english:en, japanese:jp})}]});
     if (voiceEnabled) speakText(en);
     startReplyTimer();
+  }
+  // 状況(初回 / 再会)に応じたビジュアルカードのフォールバック内容
+  function fallbackVisual() {
+    if (currentSessionCtx && currentSessionCtx.isFirstTime) {
+      return {type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'};
+    }
+    if (currentSessionCtx && currentSessionCtx.daysSince != null && currentSessionCtx.daysSince > 7) {
+      return {type:'emoji', emoji:'🙌', title:'おかえりなさい', desc:'お久しぶりです！'};
+    }
+    return {type:'emoji', emoji:'😊', title:'また話そう', desc:'今日もよろしくお願いします'};
   }
 
   var apiKey = LS.get(K.API_KEY);
@@ -1481,11 +1492,11 @@ async function sendInitialGreeting() {
 
   isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
   try {
-    var openingInstruction = '[System: This is the very first message of the call. Greet the learner and open the conversation naturally given everything in your system prompt above (their profile, and the memory of your last conversation / first-ever conversation notes if present). Keep it short and warm.]';
+    var openingInstruction = '[System: This is the very first message of the call. Greet the learner and open the conversation naturally given everything in your system prompt above (their profile, and the memory of your last conversation / first-ever conversation notes if present). This is NOT necessarily their first-ever conversation with you - only treat it that way if the "First-ever conversation" section is present above. The "visual" field is shown as a small theme card in the UI, so make it genuinely fit this specific opening: a literal "nice to meet you" card would be wrong or confusing if you already know this learner. If natural, briefly suggest one light topic for today (continuing the previous topic, or related to their hobbies/goal) and reflect that topic in the visual card title and emoji. Keep it short and warm.]';
     var body = {
       system_instruction: { parts: [{ text: selectedChar.systemPrompt(profile, level, currentSessionCtx) }] },
       contents: [{ role:'user', parts:[{ text: openingInstruction }] }],
-      generationConfig: { temperature: 0.9, maxOutputTokens: 400 }
+      generationConfig: { temperature: 0.9, maxOutputTokens: 350 }
     };
     var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
@@ -1503,8 +1514,7 @@ async function sendInitialGreeting() {
     chatHistory.push({role:'model', parts:[{text: rawText}]});
     addCaption('ai', parsed.english, parsed.japanese, null);
     if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
-    if (parsed.visual) showVisualAssist(parsed.visual);
-    else showVisualAssist({type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'});
+    showVisualAssist(parsed.visual || fallbackVisual());
     if (voiceEnabled && parsed.english) speakText(parsed.english);
     startReplyTimer();
   } catch (e) {
@@ -1593,7 +1603,7 @@ async function callGeminiForChat(retryCount) {
     var body = {
       system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level, currentSessionCtx)}]},
       contents: chatHistory,
-      generationConfig: {temperature:0.8, maxOutputTokens:600}
+      generationConfig: {temperature:0.8, maxOutputTokens:350}
     };
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
     var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
