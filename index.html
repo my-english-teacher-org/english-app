@@ -669,6 +669,7 @@ const K = {
   TOKENS_TODAY:'lm_tokens_today', TOKENS_TOTAL:'lm_tokens_total',
   P_SCORES:'lm_principle_scores', AUTO_LEARNED:'lm_auto_learned',
   VOICE_SPEED:'lm_voice_speed', MIC_PERMITTED:'lm_mic_permitted',
+  SESSION_LOG:'lm_session_log',
 };
 
 function escHtml(s) {
@@ -1176,7 +1177,7 @@ const CHARACTERS = [
     desc:'Language Parent方式\nゆっくり・優しく・シンプル',
     unlocked:true,
     avatarKey:'claude_m', mouthOriginX:49, mouthOriginY:52,
-    systemPrompt:(profile,level)=>buildTeacherPrompt(profile,level,'Claude','he/him','calm and encouraging male teacher'),
+    systemPrompt:(profile,level,sessionCtx)=>buildTeacherPrompt(profile,level,'Claude','he/him','calm and encouraging male teacher',sessionCtx),
   },
   {
     id:'claudia_f', name:'Claudia', gender:'female', emoji:'\u{1F469}\u200D\u{1F3EB}',
@@ -1184,27 +1185,76 @@ const CHARACTERS = [
     desc:'Language Parent方式\nゆっくり・優しく・シンプル',
     unlocked:true,
     avatarKey:'claudia_f', mouthOriginX:49, mouthOriginY:45,
-    systemPrompt:(profile,level)=>buildTeacherPrompt(profile,level,'Claudia','she/her','warm and encouraging female teacher'),
+    systemPrompt:(profile,level,sessionCtx)=>buildTeacherPrompt(profile,level,'Claudia','she/her','warm and encouraging female teacher',sessionCtx),
   },
 ];
+// ── プロファイルの空欄から、自然に聞き出すべき項目を洗い出す ──
+function getMissingProfileFields(profile) {
+  const missing = [];
+  if (!profile?.basic?.name || profile.basic.name === 'あなた') missing.push("the learner's name");
+  if (!profile?.basic?.job) missing.push('their job or what they do day-to-day');
+  if (!(profile?.hobbies && profile.hobbies.length)) missing.push('a hobby or something they enjoy');
+  if (!(profile?.goalFree || (profile?.goalTags && profile.goalTags.length))) missing.push('why they want to learn English (their goal)');
+  if (!(profile?.weakPoints && profile.weakPoints.length)) missing.push('what they find difficult about English');
+  return missing;
+}
 // ── システムプロンプト生成ヘルパー ──
-function buildTeacherPrompt(profile, level, name, pronouns, personality) {
+// sessionCtx: { daysSince:number|null, lastExcerpt:string|null, isFirstTime:boolean }
+function buildTeacherPrompt(profile, level, name, pronouns, personality, sessionCtx) {
   const uname  = profile?.basic?.name || 'あなた';
   const hobbies= (profile?.hobbies||[]).join(', ') || 'not specified';
   const goal   = profile?.goalFree || (profile?.goalTags||[]).join(', ') || 'general English';
   const weak   = (profile?.weakPoints||[]).join(', ') || 'not specified';
   const job    = profile?.basic?.job || 'not specified';
+  const ctx    = sessionCtx || {};
+  const missing = getMissingProfileFields(profile);
+
+  let elicitBlock = '';
+  if (missing.length > 0) {
+    elicitBlock = `
+## Getting to know the learner (important)
+You don't yet know: ${missing.join(', ')}.
+Naturally weave in ONE friendly question about ONE of these things at some point this session — never more than one personal question per reply, and never list them like an interview/checklist. Let it come up naturally from the flow of conversation (e.g. if they mention their weekend, that's a natural moment to ask about hobbies). If the learner already volunteers this info unprompted, just use it — don't force a question that's already been answered.`;
+  }
+
+  let memoryBlock = '';
+  if (ctx.lastExcerpt) {
+    const gap = ctx.daysSince == null ? '' :
+      ctx.daysSince < 1 ? 'They were just talking with you earlier today.' :
+      ctx.daysSince < 2 ? 'It has been about a day since your last conversation.' :
+      ctx.daysSince < 14 ? `It has been about ${Math.round(ctx.daysSince)} days since your last conversation.` :
+      ctx.daysSince < 45 ? 'It has been about a month since your last conversation.' :
+      'It has been a long while (over a month) since your last conversation.';
+    memoryBlock = `
+## Memory of your last conversation
+${gap}
+Here is a short excerpt from how it ended:
+"""
+${ctx.lastExcerpt}
+"""
+If this is your very first reply this session, naturally open by acknowledging the gap in a warm, human way (e.g. casually referencing how long it's been, or following up on what they last mentioned) — but only if it feels natural; don't force it if the excerpt isn't relevant. Do NOT just repeat the excerpt verbatim.`;
+  } else if (ctx.isFirstTime) {
+    memoryBlock = `
+## First-ever conversation
+This is the learner's very first conversation with you. Make them feel welcome and a little excited to start, but don't overwhelm them with questions in the first reply.`;
+  }
+
   return `You are ${name}, a ${personality} acting as a Language Parent for a Japanese learner named ${uname}.
 
 ## Learner Profile
-Name: ${uname} | Job: ${job} | Level: ${level||'intermediate'}
+Name: ${uname} | Job: ${job} | Stored level: ${level||'intermediate'}
 Hobbies: ${hobbies} | Goal: ${goal} | Weak points: ${weak}
+${elicitBlock}${memoryBlock}
 
-## Language Parent Rules (strictly follow all 4)
-1. English only. Short simple sentences (A1-A2 level max).
+## Language Parent Rules (strictly follow all)
+1. English only.
 2. NEVER directly correct errors. Naturally model the correct form in your reply.
 3. Echo back what you understood ("So you mean...?") to confirm understanding.
-4. Use vocabulary the learner already knows. Adapt to their level.
+4. Calibrate your English level LIVE, in real time, based on what the learner actually writes/says — not just the stored level above:
+   - If unsure or this is early in the relationship, start simple (short sentences, common words).
+   - If the learner responds fluently, with longer or more complex sentences, gradually use richer vocabulary and longer sentences to match them and gently stretch them a little further (i+1 — always just one small step beyond what they just showed you).
+   - If the learner seems to struggle (very short replies, lots of hesitation, basic errors), simplify further immediately, even below the stored level.
+   - Never make a capable learner feel babied, and never overwhelm a struggling one.
 
 ## Additional rules
 - Be warm, encouraging, and patient.
@@ -1294,6 +1344,7 @@ function speakText(text) {
 // ── マイク ──
 
 var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = true;
+var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var isLoading = false, callStarted = false;
 var recognition = null, micActive = false, micPermitted = null;
@@ -1389,6 +1440,17 @@ function startCall() {
   document.getElementById('ai-name-tag').textContent = selectedChar.name + ' — ' + selectedChar.title;
   chatHistory = []; document.getElementById('caption-body').innerHTML = '';
   setHintChips(['Hello! Nice to meet you!', 'My name is...', 'I like...', "I'm from Japan"]);
+
+  // 前回までの通話ログから、セッション継続用のコンテキストを作る
+  var log = LS.get(K.SESSION_LOG) || [];
+  if (log.length > 0) {
+    var last = log[0];
+    var daysSince = (Date.now() - new Date(last.endedAt).getTime()) / 86400000;
+    currentSessionCtx = { daysSince: daysSince, lastExcerpt: last.excerpt, isFirstTime: false };
+  } else {
+    currentSessionCtx = { daysSince: null, lastExcerpt: null, isFirstTime: (LS.get(K.SESSION_COUNT) || 0) === 0 };
+  }
+
   micMuted = true; updateMicUI(); resetReplyTimer(); sendInitialGreeting();
   // ★ recognitionはここでは起動しない。ユーザーが「マイクON」を押した時のみ起動する。
   //   （通話開始時に自動起動すると、ページごとに毎回許可ダイアログが出る原因になる）
@@ -1396,22 +1458,90 @@ function startCall() {
 
 async function sendInitialGreeting() {
   var profile = LS.get(K.PROFILE) || {};
+  var level   = LS.get(K.LEVEL)   || 'college';
   var name = profile.basic && profile.basic.name ? profile.basic.name : '';
-  var en = (name && name !== 'あなた')
-    ? 'Hello ' + name + '! Great to meet you! How are you today?'
-    : "Hello! I'm so happy to talk with you today! How are you?";
-  var jp = (name && name !== 'あなた')
-    ? 'こんにちは、' + name + 'さん！今日の調子はどうですか？'
-    : 'こんにちは！今日お話しできてとても嬉しいです！調子はいかがですか？';
-  addCaption('ai', en, jp, null);
-  showVisualAssist({type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'});
-  chatHistory.push({role:'model', parts:[{text: JSON.stringify({english:en, japanese:jp})}]});
-  if (voiceEnabled) speakText(en);
-  startReplyTimer();
+
+  // フォールバック用の固定挨拶(API呼び出しが失敗した場合に使う)
+  function fallbackGreeting() {
+    var en = (name && name !== 'あなた')
+      ? 'Hello ' + name + '! Great to meet you! How are you today?'
+      : "Hello! I'm so happy to talk with you today! How are you?";
+    var jp = (name && name !== 'あなた')
+      ? 'こんにちは、' + name + 'さん！今日の調子はどうですか？'
+      : 'こんにちは！今日お話しできてとても嬉しいです！調子はいかがですか？';
+    addCaption('ai', en, jp, null);
+    showVisualAssist({type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'});
+    chatHistory.push({role:'model', parts:[{text: JSON.stringify({english:en, japanese:jp})}]});
+    if (voiceEnabled) speakText(en);
+    startReplyTimer();
+  }
+
+  var apiKey = LS.get(K.API_KEY);
+  if (!apiKey || !selectedChar) { fallbackGreeting(); return; }
+
+  isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
+  try {
+    var openingInstruction = '[System: This is the very first message of the call. Greet the learner and open the conversation naturally given everything in your system prompt above (their profile, and the memory of your last conversation / first-ever conversation notes if present). Keep it short and warm.]';
+    var body = {
+      system_instruction: { parts: [{ text: selectedChar.systemPrompt(profile, level, currentSessionCtx) }] },
+      contents: [{ role:'user', parts:[{ text: openingInstruction }] }],
+      generationConfig: { temperature: 0.9, maxOutputTokens: 400 }
+    };
+    var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    removeTypingFromCaption();
+    if (!res.ok) { isLoading = false; document.getElementById('send-btn').disabled = false; fallbackGreeting(); return; }
+    var data = await res.json();
+    var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
+    var usage = data.usageMetadata || {};
+    updateTokenCost(usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, model);
+    var parsed;
+    try { parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim()); }
+    catch (pe) { parsed = null; }
+    if (!parsed || !parsed.english) { isLoading = false; document.getElementById('send-btn').disabled = false; fallbackGreeting(); return; }
+    chatHistory.push({role:'model', parts:[{text: rawText}]});
+    addCaption('ai', parsed.english, parsed.japanese, null);
+    if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
+    if (parsed.visual) showVisualAssist(parsed.visual);
+    else showVisualAssist({type:'emoji', emoji:'👋', title:'はじめまして！', desc:'お互いに知り合いましょう'});
+    if (voiceEnabled && parsed.english) speakText(parsed.english);
+    startReplyTimer();
+  } catch (e) {
+    removeTypingFromCaption();
+    fallbackGreeting();
+  }
+  isLoading = false; document.getElementById('send-btn').disabled = false;
+}
+
+function buildSessionExcerpt() {
+  // 直近のやり取り(最大2往復)を、次回の会話冒頭で参照できるよう短く保存する。
+  // 要約専用のAPI呼び出しは行わず、コスト・速度を優先してそのまま抜粋する。
+  var realTurns = chatHistory.filter(function(h) { return h.role === 'user'; });
+  if (realTurns.length === 0) return null; // 挨拶だけで終了した通話は記録しない
+  var recent = chatHistory.slice(-4);
+  var lines = recent.map(function(h) {
+    var t = (h.parts && h.parts[0] && h.parts[0].text) || '';
+    try {
+      var p = JSON.parse(t.replace(/```json|```/g, '').trim());
+      if (p && p.english) t = p.english;
+    } catch (e) {}
+    t = t.replace(/\s+/g, ' ').trim();
+    if (t.length > 140) t = t.slice(0, 140) + '...';
+    return (h.role === 'user' ? 'Learner: ' : 'Teacher: ') + t;
+  });
+  return lines.join('\n');
 }
 
 function endCall() {
   if (!confirm('通話を終了しますか？')) return;
+  var excerpt = buildSessionExcerpt();
+  if (excerpt) {
+    var log = LS.get(K.SESSION_LOG) || [];
+    log.unshift({ endedAt: new Date().toISOString(), charId: selectedChar ? selectedChar.id : null, excerpt: excerpt });
+    log = log.slice(0, 5); // 直近5件まで保持(肥大化防止)
+    LS.set(K.SESSION_LOG, log);
+  }
   callStarted = false; stopRecognition();
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   setTalking(false);
@@ -1446,7 +1576,7 @@ async function callGeminiForChat(retryCount) {
   var level   = LS.get(K.LEVEL)   || 'college';
   try {
     var body = {
-      system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level)}]},
+      system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level, currentSessionCtx)}]},
       contents: chatHistory,
       generationConfig: {temperature:0.8, maxOutputTokens:600}
     };
@@ -1535,7 +1665,7 @@ async function teacherProactiveMessage() {
   var hist = chatHistory.concat([{role:'user', parts:[{text:'[System: waitingForReply: true. Gently follow up or change topic.]'}]}]);
   try {
     var body = {
-      system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level)}]},
+      system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level, currentSessionCtx)}]},
       contents: hist,
       generationConfig: {temperature:0.9, maxOutputTokens:400}
     };
