@@ -1568,6 +1568,21 @@ async function sendMessage() {
   await callGeminiForChat(0);
 }
 
+// Gemini APIの429エラーに含まれる推奨待機時間(RetryInfo.retryDelay、例:"31s")を取り出す
+function parseRetryDelaySeconds(errData) {
+  try {
+    var details = errData && errData.error && errData.error.details;
+    if (!details) return null;
+    for (var i = 0; i < details.length; i++) {
+      if (details[i].retryDelay) {
+        var m = /^([\d.]+)s$/.exec(details[i].retryDelay);
+        if (m) return Math.ceil(parseFloat(m[1]));
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function callGeminiForChat(retryCount) {
   isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
   var apiKey = LS.get(K.API_KEY);
@@ -1582,25 +1597,27 @@ async function callGeminiForChat(retryCount) {
     };
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
     var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    removeTypingFromCaption();
     if (!res.ok) {
       var errData = await res.json().catch(function() { return {}; });
-      // レート制限(429・無料Tierのみ)は最大6回(計30秒)まで自動リトライする。
-      // ユーザーの発言を再表示したりchatHistoryに積み直したりはしない。
+      // レート制限(429・無料Tierのみ)：チャット欄を埋めないようトースト通知のみにし、
+      // APIが推奨する待機時間(retryDelay)があればそれに従う。最大6回まで自動リトライ。
       if (res.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
-        addCaption('ai', 'Oh! Rate limit. Retrying in 5 seconds...', '5秒後に自動リトライします。', null);
-        setTimeout(function() { isLoading = false; document.getElementById('send-btn').disabled = false; callGeminiForChat(retryCount + 1); }, 5000);
+        var waitSec = parseRetryDelaySeconds(errData) || Math.min(10 * (retryCount + 1), 40);
+        showToast('レート制限のため ' + waitSec + '秒待って自動リトライします (' + (retryCount + 1) + '/6)', waitSec * 1000);
+        setTimeout(function() { callGeminiForChat(retryCount + 1); }, waitSec * 1000);
         return;
       }
       // Geminiサーバー側の一時的な過負荷(503)・内部エラー(500)・タイムアウト(504)は
-      // こちら側のバグではないため、数秒待って自動的に再送する（最大2回まで）。
+      // こちら側のバグではないため、数秒待って自動的に再送する（最大2回まで、トースト通知のみ）。
       if ((res.status === 500 || res.status === 503 || res.status === 504) && retryCount < 2) {
-        addCaption('ai', 'Oh! Server busy, retrying in 3 seconds...', 'サーバー混雑中のため3秒後に自動リトライします。', null);
-        setTimeout(function() { isLoading = false; document.getElementById('send-btn').disabled = false; callGeminiForChat(retryCount + 1); }, 3000);
+        showToast('サーバー混雑中のため少し待って自動リトライします...', 3000);
+        setTimeout(function() { callGeminiForChat(retryCount + 1); }, 3000);
         return;
       }
+      removeTypingFromCaption();
       throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status + (res.status===429?' RESOURCE_EXHAUSTED':'')));
     }
+    removeTypingFromCaption();
     var data    = await res.json();
     var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
     var usage   = data.usageMetadata || {};
@@ -1710,6 +1727,7 @@ function addCaption(role, en, jp, _correction) {
   body.appendChild(div); body.scrollTop = body.scrollHeight;
 }
 function showTypingInCaption() {
+  if (document.getElementById('cap-typing')) return; // リトライ中の重複表示を防ぐ
   var body = document.getElementById('caption-body');
   var div = document.createElement('div'); div.className = 'cap-entry ai'; div.id = 'cap-typing';
   div.innerHTML = '<div class="cap-who">🤖 ' + (selectedChar ? selectedChar.name : '先生') + '</div>' +
