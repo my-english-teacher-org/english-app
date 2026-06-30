@@ -1583,11 +1583,11 @@ function initSpeechRecognition() {
   if (!SR) return;
   recognition = new SR();
   recognition.lang = 'en-US'; recognition.interimResults = true;
-  // ★ continuous=false にする。1回の発話で自動終了させ、
-  //   次の発話はonendのタイミングで「ミュートでなければ即座に再start」する。
-  //   ブラウザの許可状態（マイクアイコンが赤色のまま）は維持されるため、
-  //   許可ダイアログは初回の1回だけで済む。
-  recognition.continuous = false;
+  // ★ https化(GitHub Pages)によりブラウザがオリジン単位でマイク許可を記憶するようになったため、
+  //   以前の「1発話ごとに終了→即再start」という回避策(continuous=false)は不要かつ有害
+  //   （終了〜再startの一瞬の空白で発話の頭が拾われない／再startが失敗する原因になっていた）。
+  //   そのため continuous=true にして、許可後はセッションを維持したまま聞き続ける形にする。
+  recognition.continuous = true;
   recognition.onstart = function() {
     micActive = true;
     if (micPermitted !== true) { micPermitted = true; LS.set(K.MIC_PERMITTED, true); }
@@ -1595,9 +1595,8 @@ function initSpeechRecognition() {
   };
   recognition.onend = function() {
     micActive = false; document.getElementById('mic-indicator').classList.remove('show');
-    // ★ ミュートがOFF（マイクON状態）の間だけ、間を空けずに次のセッションを開始する。
-    //   これにより「会話が続く限りマイクは聞き続ける」体験を維持しつつ、
-    //   許可ダイアログの再発生を防ぐ（同一ページ内なら許可は保持されるため）。
+    // continuous=true でも、長い無音やネットワーク要因でブラウザ側が自発的に
+    // セッションを終了させることがあるため、安全網として再startは残しておく。
     if (callStarted && !micMuted) {
       try { recognition.start(); } catch(e) {}
     }
