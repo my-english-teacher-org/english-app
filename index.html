@@ -222,7 +222,13 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .input-panel{background:var(--surface1);border-top:1px solid var(--border2);padding:8px 12px 10px;flex-shrink:0}
 .input-panel-handle{width:30px;height:3px;background:var(--border2);border-radius:2px;margin:0 auto 8px}
 .mic-indicator-row{display:flex;justify-content:center;min-height:24px;margin-bottom:3px}
+.speech-live{display:none;background:var(--surface2);border:1px solid var(--teal2);border-radius:12px;padding:9px 13px;margin-bottom:6px;font-size:14px;color:var(--text);min-height:20px;line-height:1.4}
+.speech-live.show{display:block}
+.speech-live:empty::before{content:"🎤 話しかけてください...";color:var(--text3);font-size:13px}
 .input-hints{display:flex;gap:5px;margin-bottom:6px;flex-wrap:wrap}
+/* マイクON時は入力欄・ヒントを隠す(モバイルでキーボードが出て画面を覆う問題を防ぐ) */
+.mic-on-mode .input-row{display:none}
+.mic-on-mode .input-hints{display:none}
 .input-hint-chip{padding:3px 9px;border-radius:12px;font-size:11px;background:var(--surface2);border:1px solid var(--border2);color:var(--text3);cursor:pointer;transition:all .15s}
 .input-hint-chip:hover{border-color:var(--teal);color:var(--teal2)}
 .input-row{display:flex;gap:7px;align-items:flex-end}
@@ -456,8 +462,9 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
             <span>認識中...</span>
           </div>
         </div>
+        <div class="speech-live" id="speech-live"></div>
         <div class="input-hints" id="input-hints"></div>
-        <div class="input-row">
+        <div class="input-row" id="input-row">
           <textarea class="chat-textarea" id="chat-input" placeholder="英語で入力... (Enterで送信)" onkeydown="chatKey(event)" oninput="autoResize(this)" rows="1"></textarea>
           <button class="send-btn-call" id="send-btn" onclick="sendMessage()"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
         </div>
@@ -616,6 +623,17 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 
     <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6">先生ごとに声・高さ・速さを調整して試聴できます。ここで保存した設定が、英会話中の先生の声に反映されます。</div>
 
+    <div style="border-bottom:1px solid var(--border);padding-bottom:14px;margin-bottom:14px">
+      <label class="form-label">🎙️ あなたの音声認識の言語（英語の種類）</label>
+      <select id="recog-lang-select" class="form-input" onchange="onRecogLangChange()">
+        <option value="en-US">英語（アメリカ）en-US</option>
+        <option value="en-GB">英語（イギリス）en-GB</option>
+        <option value="en-AU">英語（オーストラリア）en-AU</option>
+        <option value="en-IN">英語（インド）en-IN</option>
+      </select>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">あなたが話した英語をうまく認識できない時は、種類を変えると改善することがあります。発音が認識されにくい場合は、少しゆっくり・区切って話すのも効果的です。</div>
+    </div>
+
     <div style="display:flex;gap:6px;margin-bottom:14px">
       <button class="voice-tab-btn active" id="voicetab-female" onclick="switchVoiceTab('female')">👩‍🏫 Claudia（女性）</button>
       <button class="voice-tab-btn" id="voicetab-male" onclick="switchVoiceTab('male')">👨‍🏫 Claude（男性）</button>
@@ -763,6 +781,7 @@ const K = {
   VOICE_SPEED:'lm_voice_speed', MIC_PERMITTED:'lm_mic_permitted',
   SESSION_LOG:'lm_session_log',
   VOICE_SETTINGS:'lm_voice_settings',
+  RECOG_LANG:'lm_recog_lang',
 };
 
 function escHtml(s) {
@@ -828,8 +847,16 @@ function openVoiceModal() {
   _voiceDraft = JSON.parse(JSON.stringify(getVoiceSettings())); // 現在値を複製して編集用に
   _voiceEditGender = 'female';
   populateVoiceSelect();
+  var rlSel = document.getElementById('recog-lang-select');
+  if (rlSel) rlSel.value = LS.get(K.RECOG_LANG) || 'en-US';
   switchVoiceTab('female');
   document.getElementById('modal-voice').classList.add('open');
+}
+function onRecogLangChange() {
+  var lang = document.getElementById('recog-lang-select').value || 'en-US';
+  LS.set(K.RECOG_LANG, lang);
+  if (recognition) { try { recognition.lang = lang; } catch(e) {} }
+  showToast('音声認識の言語を ' + lang + ' に設定しました');
 }
 function closeVoiceModal() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -1963,7 +1990,7 @@ async function callGeminiForChat(retryCount) {
       }
       startReplyTimer();
       isLoading = false; document.getElementById('send-btn').disabled = false;
-      document.getElementById('chat-input').focus();
+      if (micMuted) document.getElementById('chat-input').focus();
       return;
     }
     chatHistory.push({role:'model', parts:[{text: rawText}]});
@@ -1988,7 +2015,7 @@ async function callGeminiForChat(retryCount) {
     showToast('エラー: ' + friendly.short, 6000);
   }
   isLoading = false; document.getElementById('send-btn').disabled = false;
-  document.getElementById('chat-input').focus();
+  if (micMuted) document.getElementById('chat-input').focus();
 }
 
 // APIエラーメッセージを分かりやすく変換
@@ -2173,7 +2200,8 @@ function initSpeechRecognition() {
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
   recognition = new SR();
-  recognition.lang = 'en-US'; recognition.interimResults = true;
+  recognition.lang = LS.get(K.RECOG_LANG) || 'en-US'; recognition.interimResults = true;
+  recognition.maxAlternatives = 3; // 複数候補を取得して、より確からしい認識結果を選べるようにする
   // ★ https化(GitHub Pages)によりブラウザがオリジン単位でマイク許可を記憶するようになったため、
   //   以前の「1発話ごとに終了→即再start」という回避策(continuous=false)は不要かつ有害
   //   （終了〜再startの一瞬の空白で発話の頭が拾われない／再startが失敗する原因になっていた）。
@@ -2209,17 +2237,17 @@ function initSpeechRecognition() {
   };
   recognition.onresult = function(e) {
     if (micMuted || _micHeldForSpeech) return;
-    if (isLoading) return; // AI応答生成中は新たな発話を受け付けない(入力欄への混入を防ぐ)
+    if (isLoading) return; // AI応答生成中は新たな発話を受け付けない
     // 確定した(isFinal)分をバッファに足し、暫定(interim)分は「まだ喋っている」合図として扱う。
     var interim = '';
     for (var i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) _pendingFinal += e.results[i][0].transcript;
       else interim += e.results[i][0].transcript;
     }
-    // 入力欄に、確定分＋暫定分を途中経過として表示する(送信はまだしない)。
-    var inp = document.getElementById('chat-input');
-    inp.value = (_pendingFinal + ' ' + interim).trim();
-    autoResize(inp);
+    // ★ 入力欄(textarea)ではなく、読み取り専用のライブ表示エリアに出す。
+    //   textareaに書き込むとモバイルでフォーカスが移りキーボードが出て画面を覆うため。
+    var live = document.getElementById('speech-live');
+    if (live) live.textContent = (_pendingFinal + ' ' + interim).trim();
     // 話すたびにタイマーをリセットし、無音がSILENCE_MS続いた時点でまとめて送信する。
     if (_silenceTimer) clearTimeout(_silenceTimer);
     _silenceTimer = setTimeout(flushSpeechBuffer, SILENCE_MS);
@@ -2230,14 +2258,10 @@ function flushSpeechBuffer() {
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
   var text = (_pendingFinal || '').trim();
   _pendingFinal = '';
-  var inp = document.getElementById('chat-input');
-  if (!text || micMuted || isLoading || !callStarted) {
-    // 送信できない状況なら入力欄の途中経過も消しておく(先生の発言などが残らないように)
-    if (inp) { inp.value = ''; autoResize(inp); }
-    return;
-  }
-  inp.value = ''; autoResize(inp); // 送信前に入力欄をクリアしておく
-  sendMessage(text);
+  var live = document.getElementById('speech-live');
+  if (live) live.textContent = '';
+  if (!text || micMuted || isLoading || !callStarted) return;
+  sendMessage(text); // 入力欄は経由しない
 }
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
 // AIが読み上げている間だけ、一時的に認識を止める(自分の声が先生の声を拾わないように)。
@@ -2292,14 +2316,25 @@ function updateMicUI() {
   var wrp  = document.getElementById('mic-icon-wrap');
   var lbl  = document.getElementById('mic-label');
   var self = document.getElementById('self-area');
+  var panel = document.querySelector('.input-panel');
+  var live = document.getElementById('speech-live');
   if (micMuted) {
     if (btn) { btn.classList.remove('on'); btn.classList.add('muted-btn'); }
     if (wrp) wrp.innerHTML = SVG_MIC_OFF; if (lbl) lbl.textContent = 'ミュート';
     if (self) { self.classList.remove('mic-on'); self.classList.add('mic-off'); }
+    // ミュート時: 入力欄を表示、音声ライブ表示を隠す
+    if (panel) panel.classList.remove('mic-on-mode');
+    if (live) { live.classList.remove('show'); live.textContent = ''; }
   } else {
     if (btn) { btn.classList.add('on'); btn.classList.remove('muted-btn'); }
     if (wrp) wrp.innerHTML = SVG_MIC_ON; if (lbl) lbl.textContent = 'マイク ON';
     if (self) { self.classList.add('mic-on'); self.classList.remove('mic-off'); }
+    // マイクON時: 入力欄(とキーボード誘発源)を隠し、音声ライブ表示に切り替え
+    if (panel) panel.classList.add('mic-on-mode');
+    if (live) { live.classList.add('show'); live.textContent = ''; }
+    // 念のため入力欄からフォーカスを外してキーボードを閉じる
+    var inp = document.getElementById('chat-input');
+    if (inp) inp.blur();
   }
 }
 
