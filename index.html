@@ -239,6 +239,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .send-btn-call:disabled{opacity:.35;cursor:default}
 .speed-wrap{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text3)}
 .speed-slider{flex:1;accent-color:var(--teal2);cursor:pointer}
+#silence-slider, #voice-pitch, #voice-rate{accent-color:var(--teal2);cursor:pointer;height:22px}
 .typing-dots{display:flex;gap:3px;padding:2px 0}
 .typing-dots span{width:6px;height:6px;border-radius:50%;background:var(--text3);animation:tdot 1.2s infinite}
 .typing-dots span:nth-child(2){animation-delay:.2s}.typing-dots span:nth-child(3){animation-delay:.4s}
@@ -1454,13 +1455,19 @@ function getMissingProfileFields(profile) {
 // ── システムプロンプト生成ヘルパー ──
 // sessionCtx: { daysSince:number|null, lastExcerpt:string|null, isFirstTime:boolean }
 function buildTeacherPrompt(profile, level, name, pronouns, personality, sessionCtx) {
-  const uname  = profile?.basic?.name || 'あなた';
+  const rawName = profile?.basic?.name;
+  const hasName = rawName && rawName !== 'あなた';
+  const uname  = hasName ? rawName : 'unknown';
   const hobbies= (profile?.hobbies||[]).join(', ') || 'not specified';
   const goal   = profile?.goalFree || (profile?.goalTags||[]).join(', ') || 'general English';
   const weak   = (profile?.weakPoints||[]).join(', ') || 'not specified';
   const job    = profile?.basic?.job || 'not specified';
   const ctx    = sessionCtx || {};
   const missing = getMissingProfileFields(profile);
+  // 名前が未設定のときの、呼びかけに関する注意書き
+  const nameNote = hasName
+    ? `The learner's name is "${uname}". You may use it naturally, but not in every sentence.`
+    : `You do NOT know the learner's name yet. NEVER use a placeholder like "あなた" or "[name]" in your English — simply don't use a name at all (or say "you"). Do not write any Japanese words inside your English sentences.`;
 
   let elicitBlock = '';
   if (missing.length > 0) {
@@ -1492,15 +1499,16 @@ If this is your very first reply this session, naturally open by acknowledging t
 This is the learner's very first conversation with you. Make them feel welcome and a little excited to start, but don't overwhelm them with questions in the first reply.`;
   }
 
-  return `You are ${name}, a ${personality} acting as a Language Parent for a Japanese learner named ${uname}.
+  return `You are ${name}, a ${personality} acting as a Language Parent for a Japanese learner${hasName ? ' named ' + uname : ''}.
 
 ## Learner Profile
-Name: ${uname} | Job: ${job} | Estimated level: ${level||'beginner'}
+Name: ${hasName ? uname : 'unknown'} | Job: ${job} | Estimated level: ${level||'beginner'}
 Hobbies: ${hobbies} | Goal: ${goal} | Weak points: ${weak}
+${nameNote}
 ${elicitBlock}${memoryBlock}
 
 ## Language Parent Rules (strictly follow all)
-1. English only.
+1. English only. The "english" field must contain ONLY English words — never any Japanese characters (hiragana, katakana, kanji) or placeholders. Japanese belongs only in the "japanese"/"userJapanese" fields.
 2. NEVER directly correct errors. Naturally model the correct form in your reply.
 3. Echo back what you understood ("So you mean...?") to confirm understanding.
 4. **Match the learner's level — this is the single most important rule.** Judge their level from what they ACTUALLY write/say each turn (sentence length, vocabulary, grammar, fluency, how much they hesitate), and speak so they can comfortably understand you. Concretely:
