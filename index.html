@@ -638,7 +638,9 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
         <option value="en-AU">英語（オーストラリア）en-AU</option>
         <option value="en-IN">英語（インド）en-IN</option>
       </select>
-      <div style="font-size:10px;color:var(--text3);margin-top:4px">標準エンジンでうまく認識できない時は、種類を変えると改善することがあります。少しゆっくり・区切って話すのも効果的です。</div>
+      <label class="form-label" style="margin-top:12px">⏱️ 発話の区切り待ち時間: <span id="silence-val">2.0</span>秒</label>
+      <input type="range" id="silence-slider" min="0.8" max="5" step="0.1" value="2.0" oninput="onSilenceInput()" style="width:100%">
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">話し終わってからこの時間ぶん静かになると、一区切りとして送信します。詰まりながら話す・ゆっくり考えながら話す場合は長めにすると、文の途中で切れにくくなります。</div>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:14px">
@@ -790,6 +792,7 @@ const K = {
   VOICE_SETTINGS:'lm_voice_settings',
   RECOG_LANG:'lm_recog_lang',
   RECOG_ENGINE:'lm_recog_engine',
+  SILENCE_MS:'lm_silence_ms',
 };
 
 function escHtml(s) {
@@ -859,8 +862,19 @@ function openVoiceModal() {
   if (rlSel) rlSel.value = LS.get(K.RECOG_LANG) || 'en-US';
   var reSel = document.getElementById('recog-engine-select');
   if (reSel) reSel.value = LS.get(K.RECOG_ENGINE) || 'browser';
+  var silSlider = document.getElementById('silence-slider');
+  if (silSlider) {
+    var cur = (getSilenceMs() / 1000);
+    silSlider.value = cur;
+    document.getElementById('silence-val').textContent = cur.toFixed(1);
+  }
   switchVoiceTab('female');
   document.getElementById('modal-voice').classList.add('open');
+}
+function onSilenceInput() {
+  var sec = parseFloat(document.getElementById('silence-slider').value);
+  document.getElementById('silence-val').textContent = sec.toFixed(1);
+  LS.set(K.SILENCE_MS, Math.round(sec * 1000));
 }
 function onRecogEngineChange() {
   var eng = document.getElementById('recog-engine-select').value || 'browser';
@@ -1630,7 +1644,11 @@ var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0
 var _silenceTimer = null;      // 無音区切りタイマー(話し終わりを検知して送信)
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
-var SILENCE_MS = 1200;         // この時間ぶん無音が続いたらまとめて送信
+var SILENCE_MS = 2000;         // この時間ぶん無音が続いたらまとめて送信(既定2秒、設定で変更可)
+function getSilenceMs() {
+  var v = parseInt(LS.get(K.SILENCE_MS), 10);
+  return (v && v >= 800 && v <= 5000) ? v : SILENCE_MS;
+}
 // ── Gemini音声認識(高精度モード)用 ──
 var _mediaStream = null;       // マイクのMediaStream
 var _mediaRecorder = null;     // 録音用MediaRecorder
@@ -2303,7 +2321,7 @@ function initSpeechRecognition() {
       if (live) live.textContent = (_pendingFinal + ' ' + interim).trim();
     }
     if (_silenceTimer) clearTimeout(_silenceTimer);
-    _silenceTimer = setTimeout(flushSpeechBuffer, SILENCE_MS);
+    _silenceTimer = setTimeout(flushSpeechBuffer, getSilenceMs());
   };
 }
 // 無音区切りに達したときの処理。エンジンに応じて分岐する。
@@ -2518,7 +2536,7 @@ function startVAD() {
         _silenceTimer = setTimeout(function() {
           _silenceTimer = null;
           finalizeGeminiSegment();
-        }, SILENCE_MS);
+        }, getSilenceMs());
       }
     }
     _vadRAF = requestAnimationFrame(tick);
