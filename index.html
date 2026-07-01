@@ -1510,7 +1510,8 @@ ${elicitBlock}${memoryBlock}
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
 IMPORTANT: The "english" field MUST come FIRST in the JSON object, before any other field. This lets the app start speaking sooner.
-{"english":"2-3 short sentences","japanese":"日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}`;
+"userJapanese" = a natural Japanese translation of what the LEARNER just said (their last message), so they can check how they were understood. If the learner said nothing or it's the opening, use "".
+{"english":"2-3 short sentences","japanese":"日本語訳","userJapanese":"学習者の発言の日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}`;
 }
 
 
@@ -1636,6 +1637,7 @@ var _mediaRecorder = null;     // 録音用MediaRecorder
 var _audioChunks = [];         // 録音データの断片
 var _sawSpeech = false;        // 現在の録音区間で発話を検知したか(無音だけの録音を送らない)
 var _transcribing = false;     // Geminiに書き起こし依頼中か
+var _audioCtx = null, _analyser = null, _vadRAF = null; // 無音検知(VAD)用
 var isLoading = false, callStarted = false;
 var recognition = null, micActive = false, micPermitted = null;
 var _replyTimer = null, _waitingReply = false;
@@ -1846,6 +1848,7 @@ function endCall() {
     LS.set(K.SESSION_LOG, log);
   }
   callStarted = false; stopRecognition();
+  stopVAD();
   stopGeminiRecording();
   if (_mediaStream) { try { _mediaStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e) {} _mediaStream = null; _mediaRecorder = null; }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -1868,9 +1871,26 @@ async function sendMessage(overrideText) {
   // ★ ユーザーの発言の表示とchatHistoryへの追加は、ここで1回だけ行う。
   //   以前はリトライのたびにこの関数全体を呼び直していたため、
   //   再試行のたびに同じ発言が吹き出しとして重複表示されてしまっていた。
-  addCaption('me', text, null, null); resetReplyTimer();
+  addCaption('me', text, null, null);
+  // 直近のユーザー吹き出しに印を付け、AI応答に含まれる日本語訳を後から反映できるようにする
+  var meEntries = document.querySelectorAll('#caption-body .cap-entry.me');
+  var lastMe = meEntries[meEntries.length - 1];
+  if (lastMe) lastMe.setAttribute('data-await-jp', '1');
+  resetReplyTimer();
   chatHistory.push({role:'user', parts:[{text:text}]});
   await callGeminiForChat(0);
+}
+// AI応答から得たユーザー発話の日本語訳を、直近のユーザー吹き出しに差し込む
+function fillUserJapanese(jp) {
+  if (!jp) return;
+  var target = document.querySelector('#caption-body .cap-entry.me[data-await-jp="1"]');
+  if (!target) return;
+  target.removeAttribute('data-await-jp');
+  if (target.querySelector('.cap-jp')) return;
+  var div = document.createElement('div');
+  div.className = 'cap-jp' + (capJpEnabled ? ' show' : '');
+  div.textContent = jp;
+  target.appendChild(div);
 }
 
 // Gemini APIの429エラーに含まれる推奨待機時間(RetryInfo.retryDelay、例:"31s")を取り出す
@@ -2026,6 +2046,7 @@ async function callGeminiForChat(retryCount) {
       var ns = applySpeed(getSpeed() + parsed.speedAdjust);
       showToast('速度を' + ns.toFixed(2) + 'xに調整');
     }
+    if (parsed.userJapanese) fillUserJapanese(parsed.userJapanese);
     // 早期表示で既にenglishは出しているので、確定後は日本語訳などを補完・更新する。
     if (spokenEarly || document.querySelector('#caption-body .cap-entry.ai:last-child')) {
       updateLastAiCaption(parsed.english, parsed.japanese);
@@ -2329,6 +2350,7 @@ function startGeminiRecording() {
   if (!_mediaRecorder) return;
   _audioChunks = []; _sawSpeech = false;
   try { if (_mediaRecorder.state === 'inactive') _mediaRecorder.start(); } catch(e) {}
+  if (!micMuted) { micActive = true; document.getElementById('mic-indicator').classList.add('show'); }
 }
 // 無音区切りで呼ばれる: 録音を締め、発話があればGeminiに書き起こしてもらう。
 function finalizeGeminiSegment() {
@@ -2349,7 +2371,7 @@ function finalizeGeminiSegment() {
 // 録音音声をGeminiに送ってテキスト化し、会話に流す。
 async function transcribeWithGemini(blob, mime) {
   var apiKey = LS.get(K.API_KEY);
-  if (!apiKey) return;
+  if (!apiKey) { showToast('APIキーが設定されていません', 5000); return; }
   _transcribing = true;
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '🎤 認識中...';
@@ -2358,25 +2380,33 @@ async function transcribeWithGemini(blob, mime) {
     var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
     var body = {
       contents: [{ role:'user', parts: [
-        { text: 'Transcribe the spoken English in this audio exactly as said. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output nothing.' },
+        { text: 'Transcribe the spoken English in this audio exactly as said. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output the single word: (none)' },
         { inline_data: { mime_type: (mime.split(';')[0] || 'audio/webm'), data: base64 } }
       ]}],
       generationConfig: { temperature: 0, maxOutputTokens: 200 }
     };
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
     var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    if (!res.ok) { _transcribing = false; if (live) live.textContent = ''; return; }
+    _transcribing = false;
+    if (live) live.textContent = '';
+    if (!res.ok) {
+      var errData = await res.json().catch(function(){return {};});
+      var em = (errData.error && errData.error.message) || ('HTTP ' + res.status);
+      showToast('音声認識エラー: ' + em, 6000);
+      return;
+    }
     var data = await res.json();
     var um = data.usageMetadata || {};
     updateTokenCost(um.promptTokenCount || 0, um.candidatesTokenCount || 0, model);
     var text = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
     text = text.replace(/^["'\s]+|["'\s]+$/g, '').trim();
-    _transcribing = false;
-    if (live) live.textContent = '';
-    if (text && !micMuted && !isLoading && callStarted) sendMessage(text);
+    if (!text || /^\(?none\)?$/i.test(text)) { showToast('うまく聞き取れませんでした。もう一度話してください', 4000); return; }
+    // 認識できたら会話に送る(この時点でミュートされていても、認識結果は無駄にしない)
+    if (callStarted && !isLoading) sendMessage(text);
   } catch (e) {
     _transcribing = false;
     if (live) live.textContent = '';
+    showToast('音声認識に失敗しました: ' + (e && e.message ? e.message : e), 6000);
   }
 }
 function blobToBase64(blob) {
@@ -2412,9 +2442,13 @@ function releaseMicAfterSpeech() {
   setTimeout(function() {
     _pendingFinal = ''; _sawSpeech = false;
     if (callStarted && !micMuted && !micActive && !_micHeldForSpeech) {
-      startRecognition();
       var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
-      if (useGemini && _mediaRecorder && _mediaRecorder.state === 'inactive') startGeminiRecording();
+      if (useGemini) {
+        // Geminiモード: SpeechRecognitionは使わず録音のみ再開
+        if (_mediaRecorder && _mediaRecorder.state === 'inactive') startGeminiRecording();
+      } else {
+        startRecognition();
+      }
     }
   }, 700);
 }
@@ -2425,15 +2459,17 @@ function stopRecognition() {
 }
 async function toggleMic() {
   if (micPermitted === false) { showToast('アドレスバー左の🔒からマイクを許可してください', 6000); return; }
-  if (!recognition) { showToast('このブラウザは音声認識に対応していません', 4000); return; }
   var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
+  if (!useGemini && !recognition) { showToast('このブラウザは音声認識に対応していません', 4000); return; }
   if (micMuted) {
     micMuted = false; updateMicUI();
-    if (callStarted) startRecognition();
-    // Geminiモードなら録音も開始
     if (useGemini && callStarted) {
+      // Geminiモード: SpeechRecognitionは使わず、録音＋独自の無音検知だけで動かす
       var ok = await ensureMediaRecorder();
-      if (ok) startGeminiRecording();
+      if (ok) { startGeminiRecording(); startVAD(); }
+      else { micMuted = true; updateMicUI(); return; }
+    } else {
+      if (callStarted) startRecognition();
     }
     showToast('マイク ON 🎤');
   } else {
@@ -2443,12 +2479,56 @@ async function toggleMic() {
     if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
     _pendingFinal = ''; _micHeldForSpeech = false; _sawSpeech = false;
     stopRecognition();
+    stopVAD();
     stopGeminiRecording();
   }
 }
 function stopGeminiRecording() {
   try { if (_mediaRecorder && _mediaRecorder.state === 'recording') { _mediaRecorder.onstop = null; _mediaRecorder.stop(); } } catch(e) {}
   _audioChunks = [];
+}
+
+// ── 無音検知(VAD): マイク音量を監視し、発話→無音の切れ目で区切る ──
+function startVAD() {
+  if (!_mediaStream) return;
+  try {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var src = _audioCtx.createMediaStreamSource(_mediaStream);
+    _analyser = _audioCtx.createAnalyser();
+    _analyser.fftSize = 512;
+    src.connect(_analyser);
+  } catch (e) { return; }
+  var buf = new Uint8Array(_analyser.frequencyBinCount);
+  var SPEECH_THRESHOLD = 14; // これ以上の音量で「発話中」とみなす(0-255相当の目安)
+  function tick() {
+    if (micMuted || !_analyser) return;
+    _analyser.getByteFrequencyData(buf);
+    var sum = 0;
+    for (var i = 0; i < buf.length; i++) sum += buf[i];
+    var avg = sum / buf.length;
+    if (!_micHeldForSpeech && !_transcribing && !isLoading) {
+      if (avg > SPEECH_THRESHOLD) {
+        // 発話中: 印を立て、無音タイマーをリセット
+        _sawSpeech = true;
+        var live = document.getElementById('speech-live');
+        if (live) live.textContent = '🎤 ...';
+        if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+      } else if (_sawSpeech && !_silenceTimer) {
+        // 発話後に静かになった: 無音が続けば区切って送信
+        _silenceTimer = setTimeout(function() {
+          _silenceTimer = null;
+          finalizeGeminiSegment();
+        }, SILENCE_MS);
+      }
+    }
+    _vadRAF = requestAnimationFrame(tick);
+  }
+  _vadRAF = requestAnimationFrame(tick);
+}
+function stopVAD() {
+  if (_vadRAF) { cancelAnimationFrame(_vadRAF); _vadRAF = null; }
+  _analyser = null;
+  if (_audioCtx) { try { _audioCtx.close(); } catch(e) {} _audioCtx = null; }
 }
 function updateMicUI() {
   var btn  = document.getElementById('btn-mic');
