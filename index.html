@@ -1628,9 +1628,9 @@ function endCall() {
   LS.set(K.SESSION_COUNT, (LS.get(K.SESSION_COUNT) || 0) + 1);
 }
 
-async function sendMessage() {
+async function sendMessage(overrideText) {
   var inp  = document.getElementById('chat-input');
-  var text = inp.value.trim();
+  var text = (typeof overrideText === 'string' ? overrideText : inp.value).trim();
   if (!text || isLoading || !callStarted) return;
   inp.value = ''; autoResize(inp);
   // ★ ユーザーの発言の表示とchatHistoryへの追加は、ここで1回だけ行う。
@@ -1975,12 +1975,15 @@ function initSpeechRecognition() {
   };
   recognition.onend = function() {
     micActive = false; document.getElementById('mic-indicator').classList.remove('show');
+    // 読み上げ中に意図的に止めた場合(_micHeldForSpeech)は、ここでは再開しない。
+    // 再開は読み上げ終了時のreleaseMicAfterSpeech()に一本化する。
+    if (_micHeldForSpeech) return;
     // ★ onend直後に同期でrecognition.start()すると、ブラウザが前回セッションの
     //   マイクデバイス解放を終えておらず「start→即end」のループに陥ることがある
     //   （Chromeの既知の癖）。わずかに間を空けてから再startすることでこれを回避する。
     if (callStarted && !micMuted) {
       setTimeout(function() {
-        if (!callStarted || micMuted || micActive) return;
+        if (!callStarted || micMuted || micActive || _micHeldForSpeech) return;
         try { recognition.start(); } catch(e) {}
       }, 300);
     }
@@ -1995,6 +1998,7 @@ function initSpeechRecognition() {
   };
   recognition.onresult = function(e) {
     if (micMuted || _micHeldForSpeech) return;
+    if (isLoading) return; // AI応答生成中は新たな発話を受け付けない(入力欄への混入を防ぐ)
     // 確定した(isFinal)分をバッファに足し、暫定(interim)分は「まだ喋っている」合図として扱う。
     var interim = '';
     for (var i = e.resultIndex; i < e.results.length; i++) {
@@ -2015,10 +2019,14 @@ function flushSpeechBuffer() {
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
   var text = (_pendingFinal || '').trim();
   _pendingFinal = '';
-  if (!text || micMuted || isLoading || !callStarted) return;
   var inp = document.getElementById('chat-input');
-  inp.value = text; autoResize(inp);
-  sendMessage();
+  if (!text || micMuted || isLoading || !callStarted) {
+    // 送信できない状況なら入力欄の途中経過も消しておく(先生の発言などが残らないように)
+    if (inp) { inp.value = ''; autoResize(inp); }
+    return;
+  }
+  inp.value = ''; autoResize(inp); // 送信前に入力欄をクリアしておく
+  sendMessage(text);
 }
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
 // AIが読み上げている間だけ、一時的に認識を止める(自分の声が先生の声を拾わないように)。
@@ -2028,6 +2036,8 @@ function holdMicForSpeech() {
   _micHeldForSpeech = true;
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
   _pendingFinal = '';
+  var inp = document.getElementById('chat-input');
+  if (inp) { inp.value = ''; autoResize(inp); } // 途中経過の表示を消す
   try { if (recognition) recognition.abort(); } catch(e) {}
   micActive = false;
   document.getElementById('mic-indicator').classList.remove('show');
