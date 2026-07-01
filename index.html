@@ -1321,7 +1321,8 @@ ${elicitBlock}${memoryBlock}
 - "hints" must be 3 short example REPLIES the learner could say right now to answer the question you just asked them — not topics, not your own words repeated. They are shown as tap-to-fill suggestion chips, so they must make sense as something the learner says back to you.
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
-{"english":"2-3 short sentences","japanese":"日本語訳","visual":{"type":"emoji|none","emoji":"絵文字","title":"ラベル(3-6文字)","desc":"説明(10-15文字程度)"},"speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
+IMPORTANT: The "english" field MUST come FIRST in the JSON object, before any other field. This lets the app start speaking sooner.
+{"english":"2-3 short sentences","japanese":"日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
 }
 
 
@@ -1390,10 +1391,10 @@ function speakText(text) {
   const best = pickVoiceForGender(gender, utt.lang);
   if (best) utt.voice = best;
 
-  // 実際の読み上げ開始/終了に合わせて口の動きを連動させる
-  utt.onstart = function() { setTalking(true); };
-  utt.onend   = function() { setTalking(false); };
-  utt.onerror = function() { setTalking(false); };
+  // 実際の読み上げ開始/終了に合わせて口の動き＋マイクの一時停止/再開を連動させる
+  utt.onstart = function() { setTalking(true); holdMicForSpeech(); };
+  utt.onend   = function() { setTalking(false); releaseMicAfterSpeech(); };
+  utt.onerror = function() { setTalking(false); releaseMicAfterSpeech(); };
 
   window.speechSynthesis.speak(utt);
 }
@@ -1403,6 +1404,10 @@ function speakText(text) {
 var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = false;
 var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
+var _silenceTimer = null;      // 無音区切りタイマー(話し終わりを検知して送信)
+var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
+var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
+var SILENCE_MS = 1200;         // この時間ぶん無音が続いたらまとめて送信
 var isLoading = false, callStarted = false;
 var recognition = null, micActive = false, micPermitted = null;
 var _replyTimer = null, _waitingReply = false;
@@ -1651,6 +1656,68 @@ function parseRetryDelaySeconds(errData) {
   return null;
 }
 
+// JSONがまだ途中でも、"english":"..." の値が閉じたら早期に取り出す。
+// 文字列内のエスケープ(\" など)を考慮して、englishの値が完結しているか判定する。
+function extractEarlyEnglish(partial) {
+  var key = '"english"';
+  var ki = partial.indexOf(key);
+  if (ki === -1) return null;
+  var i = partial.indexOf('"', ki + key.length); // 値開始のダブルクオート
+  if (i === -1) return null;
+  i++;
+  var out = '';
+  while (i < partial.length) {
+    var c = partial[i];
+    if (c === '\\') { // エスケープ文字
+      if (i + 1 >= partial.length) return null; // まだ続きが来ていない
+      var nx = partial[i+1];
+      if (nx === 'n') out += '\n';
+      else if (nx === 't') out += '\t';
+      else out += nx;
+      i += 2; continue;
+    }
+    if (c === '"') return out; // 値の終端に到達＝english確定
+    out += c; i++;
+  }
+  return null; // まだ閉じていない
+}
+
+// streamGenerateContentで逐次受信し、englishが確定した時点でonEarlyEnglishを1回だけ呼ぶ。
+// 戻り値は最終的な結合済みテキスト(rawText)とusageMetadata。
+async function streamGemini(model, apiKey, body, onEarlyEnglish) {
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':streamGenerateContent?alt=sse&key=' + apiKey;
+  var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!res.ok) return { ok:false, status:res.status, errData: await res.json().catch(function(){return {};}) };
+  var reader = res.body.getReader();
+  var decoder = new TextDecoder();
+  var buffer = '', rawText = '', usage = {}, firedEarly = false;
+  while (true) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, {stream:true});
+    // SSE形式: "data: {json}\n\n" の繰り返し
+    var parts = buffer.split('\n');
+    buffer = parts.pop(); // 未完の行は次回に持ち越す
+    for (var p = 0; p < parts.length; p++) {
+      var line = parts[p].trim();
+      if (line.indexOf('data:') !== 0) continue;
+      var jsonStr = line.replace(/^data:\s*/, '');
+      if (!jsonStr) continue;
+      try {
+        var obj = JSON.parse(jsonStr);
+        var piece = obj.candidates && obj.candidates[0] && obj.candidates[0].content && obj.candidates[0].content.parts && obj.candidates[0].content.parts[0] && obj.candidates[0].content.parts[0].text;
+        if (piece) rawText += piece;
+        if (obj.usageMetadata) usage = obj.usageMetadata;
+        if (!firedEarly && onEarlyEnglish) {
+          var eng = extractEarlyEnglish(rawText.replace(/```json|```/g, ''));
+          if (eng) { firedEarly = true; onEarlyEnglish(eng); }
+        }
+      } catch (e) { /* 未完チャンクは無視 */ }
+    }
+  }
+  return { ok:true, rawText:rawText, usage:usage };
+}
+
 async function callGeminiForChat(retryCount) {
   isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
   var apiKey = LS.get(K.API_KEY);
@@ -1663,32 +1730,32 @@ async function callGeminiForChat(retryCount) {
       contents: chatHistory,
       generationConfig: {temperature:0.8, maxOutputTokens:350}
     };
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
-    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    if (!res.ok) {
-      var errData = await res.json().catch(function() { return {}; });
-      // レート制限(429・無料Tierのみ)：チャット欄を埋めないようトースト通知のみにし、
-      // APIが推奨する待機時間(retryDelay)があればそれに従う。最大6回まで自動リトライ。
-      if (res.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
+    var spokenEarly = false;
+    var result = await streamGemini(model, apiKey, body, function(earlyEnglish) {
+      // englishが確定した瞬間に、字幕表示＋読み上げを先行して開始する(体感速度の改善)。
+      removeTypingFromCaption();
+      addCaption('ai', earlyEnglish, '', null);
+      if (voiceEnabled) { speakText(earlyEnglish); spokenEarly = true; }
+    });
+    if (!result.ok) {
+      var errData = result.errData || {};
+      if (result.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
         var waitSec = parseRetryDelaySeconds(errData) || Math.min(10 * (retryCount + 1), 40);
         showToast('レート制限のため ' + waitSec + '秒待って自動リトライします (' + (retryCount + 1) + '/6)', waitSec * 1000);
         setTimeout(function() { callGeminiForChat(retryCount + 1); }, waitSec * 1000);
         return;
       }
-      // Geminiサーバー側の一時的な過負荷(503)・内部エラー(500)・タイムアウト(504)は
-      // こちら側のバグではないため、数秒待って自動的に再送する（最大2回まで、トースト通知のみ）。
-      if ((res.status === 500 || res.status === 503 || res.status === 504) && retryCount < 2) {
+      if ((result.status === 500 || result.status === 503 || result.status === 504) && retryCount < 2) {
         showToast('サーバー混雑中のため少し待って自動リトライします...', 3000);
         setTimeout(function() { callGeminiForChat(retryCount + 1); }, 3000);
         return;
       }
       removeTypingFromCaption();
-      throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status + (res.status===429?' RESOURCE_EXHAUSTED':'')));
+      throw new Error((errData.error && errData.error.message) || ('HTTP ' + result.status + (result.status===429?' RESOURCE_EXHAUSTED':'')));
     }
     removeTypingFromCaption();
-    var data    = await res.json();
-    var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
-    var usage   = data.usageMetadata || {};
+    var rawText = result.rawText || '';
+    var usage   = result.usage || {};
     updateTokenCost(usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, model);
     chatHistory.push({role:'model', parts:[{text: rawText}]});
     var parsed;
@@ -1698,10 +1765,14 @@ async function callGeminiForChat(retryCount) {
       var ns = applySpeed(getSpeed() + parsed.speedAdjust);
       showToast('速度を' + ns.toFixed(2) + 'xに調整');
     }
-    addCaption('ai', parsed.english, parsed.japanese, null);
+    // 早期表示で既にenglishは出しているので、確定後は日本語訳などを補完・更新する。
+    if (spokenEarly || document.querySelector('#caption-body .cap-entry.ai:last-child')) {
+      updateLastAiCaption(parsed.english, parsed.japanese);
+    } else {
+      addCaption('ai', parsed.english, parsed.japanese, null);
+    }
+    if (!spokenEarly && voiceEnabled && parsed.english) speakText(parsed.english);
     if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
-    if (parsed.visual) showVisualAssist(parsed.visual);
-    if (voiceEnabled && parsed.english) speakText(parsed.english);
     if (parsed.extract && Object.keys(parsed.extract).some(function(k) { return parsed.extract[k]; })) window.autoLearnFromChat(parsed.extract);
     startReplyTimer();
   } catch(e) {
@@ -1793,6 +1864,18 @@ function addCaption(role, en, jp, _correction) {
   var jpH = jp ? '<div class="cap-jp' + (capJpEnabled ? ' show' : '') + '">' + escHtml(jp) + '</div>' : '';
   div.innerHTML = who + enH + jpH;
   body.appendChild(div); body.scrollTop = body.scrollHeight;
+}
+// ストリーミングで先に出したAI字幕(englishのみ)に、確定後の日本語訳などを後から反映する
+function updateLastAiCaption(en, jp) {
+  var body = document.getElementById('caption-body');
+  var entries = body.querySelectorAll('.cap-entry.ai');
+  var last = entries[entries.length - 1];
+  if (!last) { addCaption('ai', en, jp, null); return; }
+  var who = '<div class="cap-who">🤖 ' + (selectedChar ? selectedChar.name : '先生') + '</div>';
+  var enH = capEnEnabled ? '<div class="cap-en">' + escHtml(en || '') + '</div>' : '';
+  var jpH = jp ? '<div class="cap-jp' + (capJpEnabled ? ' show' : '') + '">' + escHtml(jp) + '</div>' : '';
+  last.innerHTML = who + enH + jpH;
+  body.scrollTop = body.scrollHeight;
 }
 function showTypingInCaption() {
   if (document.getElementById('cap-typing')) return; // リトライ中の重複表示を防ぐ
@@ -1911,14 +1994,52 @@ function initSpeechRecognition() {
     }
   };
   recognition.onresult = function(e) {
-    if (micMuted) return;
-    var ft = '';
-    for (var i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) ft += e.results[i][0].transcript; }
-    ft = ft.trim();
-    if (ft) { var inp = document.getElementById('chat-input'); inp.value = ft; autoResize(inp); sendMessage(); }
+    if (micMuted || _micHeldForSpeech) return;
+    // 確定した(isFinal)分をバッファに足し、暫定(interim)分は「まだ喋っている」合図として扱う。
+    var interim = '';
+    for (var i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) _pendingFinal += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    // 入力欄に、確定分＋暫定分を途中経過として表示する(送信はまだしない)。
+    var inp = document.getElementById('chat-input');
+    inp.value = (_pendingFinal + ' ' + interim).trim();
+    autoResize(inp);
+    // 話すたびにタイマーをリセットし、無音がSILENCE_MS続いた時点でまとめて送信する。
+    if (_silenceTimer) clearTimeout(_silenceTimer);
+    _silenceTimer = setTimeout(flushSpeechBuffer, SILENCE_MS);
   };
 }
+// 無音区切りに達したら、たまった発話をまとめて1回だけ送信する
+function flushSpeechBuffer() {
+  if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+  var text = (_pendingFinal || '').trim();
+  _pendingFinal = '';
+  if (!text || micMuted || isLoading || !callStarted) return;
+  var inp = document.getElementById('chat-input');
+  inp.value = text; autoResize(inp);
+  sendMessage();
+}
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
+// AIが読み上げている間だけ、一時的に認識を止める(自分の声が先生の声を拾わないように)。
+// UI上のマイクON/OFF状態(micMuted)は変えないので、ユーザーには「常時ON」のまま見える。
+function holdMicForSpeech() {
+  if (micMuted || _micHeldForSpeech) return;
+  _micHeldForSpeech = true;
+  if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+  _pendingFinal = '';
+  try { if (recognition) recognition.abort(); } catch(e) {}
+  micActive = false;
+  document.getElementById('mic-indicator').classList.remove('show');
+}
+function releaseMicAfterSpeech() {
+  if (!_micHeldForSpeech) return;
+  _micHeldForSpeech = false;
+  // 読み上げ直後は少し間を空けてから再開(デバイス解放待ち＆残響を拾わないため)
+  setTimeout(function() {
+    if (callStarted && !micMuted && !micActive) startRecognition();
+  }, 350);
+}
 function stopRecognition() {
   if (!recognition) return; micActive = false;
   document.getElementById('mic-indicator').classList.remove('show');
@@ -1935,7 +2056,9 @@ function toggleMic() {
     micMuted = true; updateMicUI();
     document.getElementById('mic-indicator').classList.remove('show');
     showToast('ミュートにしました 🔇');
-    // ミュート時は完全に停止する（バックグラウンドで動かし続けない）
+    // ミュート時は完全に停止し、たまっている発話・タイマーも破棄する
+    if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+    _pendingFinal = ''; _micHeldForSpeech = false;
     stopRecognition();
   }
 }
