@@ -624,14 +624,21 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
     <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6">先生ごとに声・高さ・速さを調整して試聴できます。ここで保存した設定が、英会話中の先生の声に反映されます。</div>
 
     <div style="border-bottom:1px solid var(--border);padding-bottom:14px;margin-bottom:14px">
-      <label class="form-label">🎙️ あなたの音声認識の言語（英語の種類）</label>
+      <label class="form-label">🎙️ 音声認識エンジン</label>
+      <select id="recog-engine-select" class="form-input" onchange="onRecogEngineChange()">
+        <option value="browser">標準（ブラウザ内蔵・無料・やや不正確）</option>
+        <option value="gemini">高精度（Geminiで書き起こし・少し課金）</option>
+      </select>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">「高精度」は、話した音声をGeminiに送って文字起こしします。日本語なまりの英語でも認識されやすくなりますが、音声を送るぶん通信・料金が少し増えます。認識が悪いと感じたら「高精度」をお試しください。</div>
+
+      <label class="form-label" style="margin-top:12px">🌐 認識する英語の種類（標準エンジン用）</label>
       <select id="recog-lang-select" class="form-input" onchange="onRecogLangChange()">
         <option value="en-US">英語（アメリカ）en-US</option>
         <option value="en-GB">英語（イギリス）en-GB</option>
         <option value="en-AU">英語（オーストラリア）en-AU</option>
         <option value="en-IN">英語（インド）en-IN</option>
       </select>
-      <div style="font-size:10px;color:var(--text3);margin-top:4px">あなたが話した英語をうまく認識できない時は、種類を変えると改善することがあります。発音が認識されにくい場合は、少しゆっくり・区切って話すのも効果的です。</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">標準エンジンでうまく認識できない時は、種類を変えると改善することがあります。少しゆっくり・区切って話すのも効果的です。</div>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:14px">
@@ -782,6 +789,7 @@ const K = {
   SESSION_LOG:'lm_session_log',
   VOICE_SETTINGS:'lm_voice_settings',
   RECOG_LANG:'lm_recog_lang',
+  RECOG_ENGINE:'lm_recog_engine',
 };
 
 function escHtml(s) {
@@ -849,8 +857,20 @@ function openVoiceModal() {
   populateVoiceSelect();
   var rlSel = document.getElementById('recog-lang-select');
   if (rlSel) rlSel.value = LS.get(K.RECOG_LANG) || 'en-US';
+  var reSel = document.getElementById('recog-engine-select');
+  if (reSel) reSel.value = LS.get(K.RECOG_ENGINE) || 'browser';
   switchVoiceTab('female');
   document.getElementById('modal-voice').classList.add('open');
+}
+function onRecogEngineChange() {
+  var eng = document.getElementById('recog-engine-select').value || 'browser';
+  LS.set(K.RECOG_ENGINE, eng);
+  showToast(eng === 'gemini' ? '高精度認識(Gemini)に切り替えました' : '標準認識に切り替えました');
+  // 通話中に切り替えた場合、次の発話から反映される(録音状態を作り直す)
+  if (callStarted && !micMuted) {
+    if (eng === 'gemini') { ensureMediaRecorder().then(function(ok){ if (ok) startGeminiRecording(); }); }
+    else { stopGeminiRecording(); }
+  }
 }
 function onRecogLangChange() {
   var lang = document.getElementById('recog-lang-select').value || 'en-US';
@@ -1610,6 +1630,12 @@ var _silenceTimer = null;      // 無音区切りタイマー(話し終わりを
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
 var SILENCE_MS = 1200;         // この時間ぶん無音が続いたらまとめて送信
+// ── Gemini音声認識(高精度モード)用 ──
+var _mediaStream = null;       // マイクのMediaStream
+var _mediaRecorder = null;     // 録音用MediaRecorder
+var _audioChunks = [];         // 録音データの断片
+var _sawSpeech = false;        // 現在の録音区間で発話を検知したか(無音だけの録音を送らない)
+var _transcribing = false;     // Geminiに書き起こし依頼中か
 var isLoading = false, callStarted = false;
 var recognition = null, micActive = false, micPermitted = null;
 var _replyTimer = null, _waitingReply = false;
@@ -1820,6 +1846,8 @@ function endCall() {
     LS.set(K.SESSION_LOG, log);
   }
   callStarted = false; stopRecognition();
+  stopGeminiRecording();
+  if (_mediaStream) { try { _mediaStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e) {} _mediaStream = null; _mediaRecorder = null; }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   setTalking(false);
   resetReplyTimer(); chatHistory = []; selectedChar = null;
@@ -2237,56 +2265,157 @@ function initSpeechRecognition() {
   };
   recognition.onresult = function(e) {
     if (micMuted || _micHeldForSpeech) return;
-    if (isLoading) return; // AI応答生成中は新たな発話を受け付けない
-    // 確定した(isFinal)分をバッファに足し、暫定(interim)分は「まだ喋っている」合図として扱う。
+    if (isLoading || _transcribing) return; // AI応答生成中・書き起こし中は受け付けない
+    var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
     var interim = '';
     for (var i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) _pendingFinal += e.results[i][0].transcript;
       else interim += e.results[i][0].transcript;
     }
-    // ★ 入力欄(textarea)ではなく、読み取り専用のライブ表示エリアに出す。
-    //   textareaに書き込むとモバイルでフォーカスが移りキーボードが出て画面を覆うため。
+    _sawSpeech = true; // 発話を検知(Geminiモードで無音だけの録音を送らないための印)
     var live = document.getElementById('speech-live');
-    if (live) live.textContent = (_pendingFinal + ' ' + interim).trim();
-    // 話すたびにタイマーをリセットし、無音がSILENCE_MS続いた時点でまとめて送信する。
+    if (useGemini) {
+      // Geminiモードでは書き起こしはGeminiに任せるので、ここでは「認識中」表示だけ出す
+      if (live) live.textContent = '🎤 ...';
+    } else {
+      // ブラウザモードでは従来通り、認識テキストを途中経過として表示
+      if (live) live.textContent = (_pendingFinal + ' ' + interim).trim();
+    }
     if (_silenceTimer) clearTimeout(_silenceTimer);
     _silenceTimer = setTimeout(flushSpeechBuffer, SILENCE_MS);
   };
 }
-// 無音区切りに達したら、たまった発話をまとめて1回だけ送信する
+// 無音区切りに達したときの処理。エンジンに応じて分岐する。
 function flushSpeechBuffer() {
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+  var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
+  if (useGemini) {
+    // Geminiモード: 録音を締めてGeminiに書き起こしてもらう
+    finalizeGeminiSegment();
+    return;
+  }
+  // ブラウザモード: 認識済みテキストをそのまま送信
   var text = (_pendingFinal || '').trim();
   _pendingFinal = '';
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '';
   if (!text || micMuted || isLoading || !callStarted) return;
-  sendMessage(text); // 入力欄は経由しない
+  sendMessage(text);
 }
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
+
+// ── Gemini音声認識モード: 録音とGeminiへの書き起こし ──
+// マイクのMediaStreamを確保し、MediaRecorderで録音を開始する。
+async function ensureMediaRecorder() {
+  if (_mediaRecorder && _mediaStream && _mediaStream.active) return true;
+  try {
+    _mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    showToast('マイクを使用できませんでした', 5000);
+    return false;
+  }
+  var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+           : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+           : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''));
+  try {
+    _mediaRecorder = mime ? new MediaRecorder(_mediaStream, {mimeType:mime}) : new MediaRecorder(_mediaStream);
+  } catch (e) {
+    _mediaRecorder = new MediaRecorder(_mediaStream);
+  }
+  _mediaRecorder.ondataavailable = function(ev) { if (ev.data && ev.data.size > 0) _audioChunks.push(ev.data); };
+  return true;
+}
+function startGeminiRecording() {
+  if (!_mediaRecorder) return;
+  _audioChunks = []; _sawSpeech = false;
+  try { if (_mediaRecorder.state === 'inactive') _mediaRecorder.start(); } catch(e) {}
+}
+// 無音区切りで呼ばれる: 録音を締め、発話があればGeminiに書き起こしてもらう。
+function finalizeGeminiSegment() {
+  if (!_mediaRecorder || _mediaRecorder.state !== 'recording') { return; }
+  var hadSpeech = _sawSpeech;
+  var mime = _mediaRecorder.mimeType || 'audio/webm';
+  _mediaRecorder.onstop = function() {
+    var chunks = _audioChunks; _audioChunks = [];
+    // 次の発話に備えてすぐ録音を再開(マイクONの間は録り続ける)
+    if (callStarted && !micMuted && !_micHeldForSpeech) startGeminiRecording();
+    if (!hadSpeech || chunks.length === 0 || isLoading || micMuted || !callStarted) return;
+    var blob = new Blob(chunks, {type: mime});
+    if (blob.size < 1200) return; // ごく短い(ノイズ程度)の録音は無視
+    transcribeWithGemini(blob, mime);
+  };
+  try { _mediaRecorder.stop(); } catch(e) {}
+}
+// 録音音声をGeminiに送ってテキスト化し、会話に流す。
+async function transcribeWithGemini(blob, mime) {
+  var apiKey = LS.get(K.API_KEY);
+  if (!apiKey) return;
+  _transcribing = true;
+  var live = document.getElementById('speech-live');
+  if (live) live.textContent = '🎤 認識中...';
+  try {
+    var base64 = await blobToBase64(blob);
+    var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+    var body = {
+      contents: [{ role:'user', parts: [
+        { text: 'Transcribe the spoken English in this audio exactly as said. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output nothing.' },
+        { inline_data: { mime_type: (mime.split(';')[0] || 'audio/webm'), data: base64 } }
+      ]}],
+      generationConfig: { temperature: 0, maxOutputTokens: 200 }
+    };
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if (!res.ok) { _transcribing = false; if (live) live.textContent = ''; return; }
+    var data = await res.json();
+    var um = data.usageMetadata || {};
+    updateTokenCost(um.promptTokenCount || 0, um.candidatesTokenCount || 0, model);
+    var text = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
+    text = text.replace(/^["'\s]+|["'\s]+$/g, '').trim();
+    _transcribing = false;
+    if (live) live.textContent = '';
+    if (text && !micMuted && !isLoading && callStarted) sendMessage(text);
+  } catch (e) {
+    _transcribing = false;
+    if (live) live.textContent = '';
+  }
+}
+function blobToBase64(blob) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload = function() { resolve(String(r.result).split(',')[1]); };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
 // AIが読み上げている間だけ、一時的に認識を止める(自分の声が先生の声を拾わないように)。
 // UI上のマイクON/OFF状態(micMuted)は変えないので、ユーザーには「常時ON」のまま見える。
 function holdMicForSpeech() {
   if (micMuted || _micHeldForSpeech) return;
   _micHeldForSpeech = true;
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
-  _pendingFinal = '';
+  _pendingFinal = ''; _sawSpeech = false;
   var inp = document.getElementById('chat-input');
-  if (inp) { inp.value = ''; autoResize(inp); } // 途中経過の表示を消す
+  if (inp) { inp.value = ''; autoResize(inp); }
+  var live = document.getElementById('speech-live');
+  if (live) live.textContent = '';
   try { if (recognition) recognition.abort(); } catch(e) {}
+  // Geminiモードの録音も止めて、先生の声を録らないようにする(onstopで送信させない)
+  try { if (_mediaRecorder && _mediaRecorder.state === 'recording') { _mediaRecorder.onstop = null; _mediaRecorder.stop(); } } catch(e) {}
+  _audioChunks = [];
   micActive = false;
   document.getElementById('mic-indicator').classList.remove('show');
 }
 function releaseMicAfterSpeech() {
   if (!_micHeldForSpeech) return;
   _micHeldForSpeech = false;
-  // 読み上げ直後は少し長めに間を空けてから再開する。
-  // ブラウザのTTSはonendが実際の音声終了より僅かに早く発火することがあり、
-  // すぐ再開するとスピーカーから出た先生の声の残響を自分のマイクが拾って
-  // 「自分が発話した」ことになってしまうため、その混入を防ぐ。
   setTimeout(function() {
-    _pendingFinal = ''; // 念のため、この間に紛れ込んだ断片を破棄
-    if (callStarted && !micMuted && !micActive && !_micHeldForSpeech) startRecognition();
+    _pendingFinal = ''; _sawSpeech = false;
+    if (callStarted && !micMuted && !micActive && !_micHeldForSpeech) {
+      startRecognition();
+      var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
+      if (useGemini && _mediaRecorder && _mediaRecorder.state === 'inactive') startGeminiRecording();
+    }
   }, 700);
 }
 function stopRecognition() {
@@ -2294,22 +2423,32 @@ function stopRecognition() {
   document.getElementById('mic-indicator').classList.remove('show');
   try { recognition.abort(); } catch(e) {}
 }
-function toggleMic() {
+async function toggleMic() {
   if (micPermitted === false) { showToast('アドレスバー左の🔒からマイクを許可してください', 6000); return; }
   if (!recognition) { showToast('このブラウザは音声認識に対応していません', 4000); return; }
+  var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
   if (micMuted) {
     micMuted = false; updateMicUI();
     if (callStarted) startRecognition();
+    // Geminiモードなら録音も開始
+    if (useGemini && callStarted) {
+      var ok = await ensureMediaRecorder();
+      if (ok) startGeminiRecording();
+    }
     showToast('マイク ON 🎤');
   } else {
     micMuted = true; updateMicUI();
     document.getElementById('mic-indicator').classList.remove('show');
     showToast('ミュートにしました 🔇');
-    // ミュート時は完全に停止し、たまっている発話・タイマーも破棄する
     if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
-    _pendingFinal = ''; _micHeldForSpeech = false;
+    _pendingFinal = ''; _micHeldForSpeech = false; _sawSpeech = false;
     stopRecognition();
+    stopGeminiRecording();
   }
+}
+function stopGeminiRecording() {
+  try { if (_mediaRecorder && _mediaRecorder.state === 'recording') { _mediaRecorder.onstop = null; _mediaRecorder.stop(); } } catch(e) {}
+  _audioChunks = [];
 }
 function updateMicUI() {
   var btn  = document.getElementById('btn-mic');
