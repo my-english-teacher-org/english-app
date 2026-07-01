@@ -1444,7 +1444,9 @@ function startReplyTimer() {
   resetReplyTimer(); _waitingReply = true;
   // ★ マイクがミュート解除(ON)の間だけ、無発話タイマーで先生から話しかけさせる。
   //   ミュート中はユーザーが意図的に黙っている可能性が高いため発動しない。
-  _replyTimer = setTimeout(function() { if (callStarted && !isLoading && _waitingReply && !micMuted) teacherProactiveMessage(); }, REPLY_WAIT_MS);
+  _replyTimer = setTimeout(function() {
+    if (callStarted && !isLoading && _waitingReply && !micMuted && !_micHeldForSpeech) teacherProactiveMessage();
+  }, REPLY_WAIT_MS);
 }
 
 function initCallScreen() {
@@ -1668,9 +1670,10 @@ function parseRetryDelaySeconds(errData) {
 }
 
 // JSONがまだ途中でも、"english":"..." の値が閉じたら早期に取り出す。
-// 文字列内のエスケープ(\" など)を考慮して、englishの値が完結しているか判定する。
-function extractEarlyEnglish(partial) {
-  var key = '"english"';
+// JSONがまだ途中でも、指定キーの文字列値が閉じたら早期に取り出す(汎用版)。
+// 文字列内のエスケープ(\" など)を考慮して、値が完結しているか判定する。
+function extractJsonStringField(partial, fieldName) {
+  var key = '"' + fieldName + '"';
   var ki = partial.indexOf(key);
   if (ki === -1) return null;
   var i = partial.indexOf('"', ki + key.length); // 値開始のダブルクオート
@@ -1687,10 +1690,13 @@ function extractEarlyEnglish(partial) {
       else out += nx;
       i += 2; continue;
     }
-    if (c === '"') return out; // 値の終端に到達＝english確定
+    if (c === '"') return out; // 値の終端に到達＝確定
     out += c; i++;
   }
   return null; // まだ閉じていない
+}
+function extractEarlyEnglish(partial) {
+  return extractJsonStringField(partial, 'english');
 }
 
 // streamGenerateContentで逐次受信し、englishが確定した時点でonEarlyEnglishを1回だけ呼ぶ。
@@ -1768,10 +1774,35 @@ async function callGeminiForChat(retryCount) {
     var rawText = result.rawText || '';
     var usage   = result.usage || {};
     updateTokenCost(usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, model);
-    chatHistory.push({role:'model', parts:[{text: rawText}]});
     var parsed;
-    try { parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim()); }
-    catch (pe) { parsed = {english:rawText, japanese:'', visual:null, speedAdjust:0, hints:[], extract:{}}; }
+    try {
+      parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+    } catch (pe) {
+      // JSONが途中で切れた等でパースできない場合、生JSONをそのまま出さない。
+      // englishフィールドだけでも部分抽出できれば、それを使う。
+      var salvagedEn = extractEarlyEnglish(rawText.replace(/```json|```/g, ''));
+      var salvagedJp = extractJsonStringField(rawText, 'japanese');
+      if (salvagedEn) {
+        parsed = {english: salvagedEn, japanese: salvagedJp || '', speedAdjust:0, hints:[], extract:{}};
+      } else {
+        parsed = null;
+      }
+    }
+    if (!parsed || !parsed.english) {
+      // 何も取り出せない場合は、生JSONを表示せず素直にエラー扱いにする。
+      if (spokenEarly) {
+        // 早期表示済みなら、その表示を活かして日本語だけ諦める
+        updateLastAiCaption(extractEarlyEnglish(rawText.replace(/```json|```/g, '')) || '...', '');
+        chatHistory.push({role:'model', parts:[{text: rawText}]});
+      } else {
+        addCaption('ai', '⚠️ Sorry, could you say that again?', 'うまく応答を受け取れませんでした。もう一度話しかけてください。', null);
+      }
+      startReplyTimer();
+      isLoading = false; document.getElementById('send-btn').disabled = false;
+      document.getElementById('chat-input').focus();
+      return;
+    }
+    chatHistory.push({role:'model', parts:[{text: rawText}]});
     if (parsed.speedAdjust && parsed.speedAdjust !== 0) {
       var ns = applySpeed(getSpeed() + parsed.speedAdjust);
       showToast('速度を' + ns.toFixed(2) + 'xに調整');
@@ -1846,12 +1877,17 @@ async function teacherProactiveMessage() {
     updateTokenCost(um.promptTokenCount || 0, um.candidatesTokenCount || 0, model);
     chatHistory.push({role:'model', parts:[{text: rawText}]});
     var parsed;
-    try { parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim()); }
-    catch (pe) { parsed = {english:rawText, japanese:'', visual:null, speedAdjust:0, hints:[]}; }
+    try {
+      parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+    } catch (pe) {
+      var pEn = extractEarlyEnglish(rawText.replace(/```json|```/g, ''));
+      var pJp = extractJsonStringField(rawText, 'japanese');
+      parsed = pEn ? {english: pEn, japanese: pJp || '', speedAdjust:0, hints:[]} : null;
+    }
+    if (!parsed || !parsed.english) { isLoading = false; document.getElementById('send-btn').disabled = false; startReplyTimer(); return; }
     if (parsed.speedAdjust && parsed.speedAdjust !== 0) applySpeed(getSpeed() + parsed.speedAdjust);
     addCaption('ai', parsed.english, parsed.japanese, null);
     if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
-    if (parsed.visual) showVisualAssist(parsed.visual);
     if (voiceEnabled && parsed.english) speakText(parsed.english);
     startReplyTimer();
   } catch(e) {
@@ -2056,10 +2092,14 @@ function holdMicForSpeech() {
 function releaseMicAfterSpeech() {
   if (!_micHeldForSpeech) return;
   _micHeldForSpeech = false;
-  // 読み上げ直後は少し間を空けてから再開(デバイス解放待ち＆残響を拾わないため)
+  // 読み上げ直後は少し長めに間を空けてから再開する。
+  // ブラウザのTTSはonendが実際の音声終了より僅かに早く発火することがあり、
+  // すぐ再開するとスピーカーから出た先生の声の残響を自分のマイクが拾って
+  // 「自分が発話した」ことになってしまうため、その混入を防ぐ。
   setTimeout(function() {
-    if (callStarted && !micMuted && !micActive) startRecognition();
-  }, 350);
+    _pendingFinal = ''; // 念のため、この間に紛れ込んだ断片を破棄
+    if (callStarted && !micMuted && !micActive && !_micHeldForSpeech) startRecognition();
+  }, 700);
 }
 function stopRecognition() {
   if (!recognition) return; micActive = false;
