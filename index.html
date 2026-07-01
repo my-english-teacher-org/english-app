@@ -391,7 +391,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
       <button class="nav-menu-item active" id="nav-call-btn" onclick="closeNavMenu()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2" /></svg>通話</button>
       <button class="nav-menu-item" onclick="closeNavMenu(); openProfileModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" /><path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /></svg>プロファイル</button>
       <button class="nav-menu-item" onclick="closeNavMenu(); openSettingsModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065" /><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></svg>設定</button>
-      <button class="nav-menu-item" onclick="closeNavMenu(); openVoiceModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8" /><path d="M17.7 5a9 9 0 0 1 0 14" /><path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" /></svg>音声調整</button>
+      <button class="nav-menu-item" onclick="closeNavMenu(); openVoiceModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8" /><path d="M17.7 5a9 9 0 0 1 0 14" /><path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" /></svg>AI音声調整</button>
     </div>
   </div>
 
@@ -612,7 +612,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 <!-- ═══════════════════ 音声調整モーダル ═══════════════════ -->
 <div class="modal-overlay" id="modal-voice" onclick="if(event.target===this) closeVoiceModal()">
   <div class="modal">
-    <div class="modal-title"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8" /><path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" /></svg> 音声調整<button onclick="closeVoiceModal()" style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button></div>
+    <div class="modal-title"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8" /><path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" /></svg> AI音声調整<button onclick="closeVoiceModal()" style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button></div>
 
     <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6">先生ごとに声・高さ・速さを調整して試聴できます。ここで保存した設定が、英会話中の先生の声に反映されます。</div>
 
@@ -1148,6 +1148,13 @@ window.autoLearnFromChat = function(extractedInfo) {
     profile.goalFree = extractedInfo.goal;
     entries.push({ key:'goal', val: extractedInfo.goal, label:'目標' });
   }
+  // AIが推定した英語レベルを保存し、次回以降の開始レベル・話し方の基準にする。
+  var validLevels = ['beginner','elementary','intermediate','advanced'];
+  if (extractedInfo.estimatedLevel && validLevels.indexOf(extractedInfo.estimatedLevel) !== -1) {
+    if (LS.get(K.LEVEL) !== extractedInfo.estimatedLevel) {
+      LS.set(K.LEVEL, extractedInfo.estimatedLevel);
+    }
+  }
   if (extractedInfo.misc) {
     // その他の情報はauto_learnedに追記
     learned.push({ val: extractedInfo.misc, date: new Date().toISOString().slice(0,10) });
@@ -1427,7 +1434,7 @@ This is the learner's very first conversation with you. Make them feel welcome a
   return `You are ${name}, a ${personality} acting as a Language Parent for a Japanese learner named ${uname}.
 
 ## Learner Profile
-Name: ${uname} | Job: ${job} | Stored level: ${level||'intermediate'}
+Name: ${uname} | Job: ${job} | Estimated level: ${level||'beginner'}
 Hobbies: ${hobbies} | Goal: ${goal} | Weak points: ${weak}
 ${elicitBlock}${memoryBlock}
 
@@ -1435,11 +1442,15 @@ ${elicitBlock}${memoryBlock}
 1. English only.
 2. NEVER directly correct errors. Naturally model the correct form in your reply.
 3. Echo back what you understood ("So you mean...?") to confirm understanding.
-4. Calibrate your English level LIVE, in real time, based on what the learner actually writes/says — not just the stored level above:
-   - If unsure or this is early in the relationship, start simple (short sentences, common words).
-   - If the learner responds fluently, with longer or more complex sentences, gradually use richer vocabulary and longer sentences to match them and gently stretch them a little further (i+1 — always just one small step beyond what they just showed you).
-   - If the learner seems to struggle (very short replies, lots of hesitation, basic errors), simplify further immediately, even below the stored level.
-   - Never make a capable learner feel babied, and never overwhelm a struggling one.
+4. **Match the learner's level — this is the single most important rule.** Judge their level from what they ACTUALLY write/say each turn (sentence length, vocabulary, grammar, fluency, how much they hesitate), and speak so they can comfortably understand you. Concretely:
+   - **beginner**: Use only very common words (top ~1000). MAX 8 words per sentence. One idea per sentence. Present simple tense mostly. No idioms, no phrasal verbs, no complex clauses. Example feel: "That's nice! Do you like music? What music do you like?"
+   - **elementary**: Simple everyday words. MAX 12 words per sentence. Basic past/future OK. Very common phrasal verbs OK. Avoid idioms.
+   - **intermediate**: Natural everyday English. Up to ~18 words. Common idioms and phrasal verbs OK.
+   - **advanced**: Speak naturally with rich vocabulary and varied structures.
+   - When in doubt, go SIMPLER. It is much worse to overwhelm a struggling learner than to be a little too simple.
+   - Only stretch them by a tiny step (i+1) beyond what they just showed you — never a big leap.
+   - If they reply fluently over several turns, you may move up one level. If they struggle (very short replies, confusion, many errors), drop down a level immediately.
+5. In "extract.estimatedLevel", output your current best estimate of their level as exactly one of: beginner / elementary / intermediate / advanced. Base it on the whole conversation so far. This is saved and used to set your starting level next time.
 
 ## Additional rules
 - Be warm, encouraging, and patient.
@@ -1452,7 +1463,7 @@ ${elicitBlock}${memoryBlock}
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
 IMPORTANT: The "english" field MUST come FIRST in the JSON object, before any other field. This lets the app start speaking sooner.
-{"english":"2-3 short sentences","japanese":"日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","misc":""}}`;
+{"english":"2-3 short sentences","japanese":"日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}`;
 }
 
 
