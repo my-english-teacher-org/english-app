@@ -78,6 +78,8 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .cta-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;border-radius:var(--radius);background:linear-gradient(135deg,var(--teal),var(--teal2));border:none;color:#fff;font-size:14px;font-weight:600;font-family:var(--font-b);cursor:pointer;transition:opacity .15s}
 .cta-btn:hover{opacity:.88}
 .btn-secondary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;border-radius:var(--radius);background:none;border:1px solid var(--border2);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer;transition:all .15s;margin-top:7px}
+.btn-primary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px;border-radius:var(--radius);background:linear-gradient(135deg,var(--teal),var(--teal2));border:none;color:#fff;font-size:13px;font-weight:600;font-family:var(--font-b);cursor:pointer;transition:all .15s;margin-top:7px}
+.btn-primary:hover{opacity:.9}
 .btn-secondary:hover{background:var(--surface2)}
 .btn-danger{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;border-radius:var(--radius);background:none;border:1px solid rgba(239,68,68,.4);color:var(--coral);font-size:13px;font-family:var(--font-b);cursor:pointer;transition:all .15s;margin-top:7px}
 .btn-danger:hover{background:rgba(239,68,68,.1)}
@@ -114,6 +116,8 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .modal-overlay.open{display:flex}
 .modal{background:var(--surface1);border:1px solid var(--border2);border-radius:16px;padding:22px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto}
 .modal-title{font-family:var(--font-d);font-size:16px;font-weight:700;margin:-22px -22px 14px -22px;padding:22px 22px 10px 22px;display:flex;align-items:center;gap:7px;position:sticky;top:-22px;background:var(--surface1);z-index:5}
+.voice-tab-btn{flex:1;padding:8px;border:1px solid var(--border2);background:var(--surface1);color:var(--text3);border-radius:var(--radius-sm);font-size:12px;font-family:var(--font-b);cursor:pointer}
+.voice-tab-btn.active{background:var(--surface2);color:var(--teal2);border-color:var(--teal2)}
 .help-item{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--border)}
 .help-item:last-child{border-bottom:none}
 .help-icon{font-size:20px;width:28px;flex-shrink:0;text-align:center}
@@ -387,6 +391,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
       <button class="nav-menu-item active" id="nav-call-btn" onclick="closeNavMenu()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2" /></svg>通話</button>
       <button class="nav-menu-item" onclick="closeNavMenu(); openProfileModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" /><path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /></svg>プロファイル</button>
       <button class="nav-menu-item" onclick="closeNavMenu(); openSettingsModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065" /><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></svg>設定</button>
+      <button class="nav-menu-item" onclick="closeNavMenu(); openVoiceModal()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8" /><path d="M17.7 5a9 9 0 0 1 0 14" /><path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" /></svg>音声調整</button>
     </div>
   </div>
 
@@ -604,6 +609,40 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
   </div>
 </div>
 
+<!-- ═══════════════════ 音声調整モーダル ═══════════════════ -->
+<div class="modal-overlay" id="modal-voice" onclick="if(event.target===this) closeVoiceModal()">
+  <div class="modal">
+    <div class="modal-title"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8" /><path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" /></svg> 音声調整<button onclick="closeVoiceModal()" style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button></div>
+
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6">先生ごとに声・高さ・速さを調整して試聴できます。ここで保存した設定が、英会話中の先生の声に反映されます。</div>
+
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button class="voice-tab-btn active" id="voicetab-female" onclick="switchVoiceTab('female')">👩‍🏫 Claudia（女性）</button>
+      <button class="voice-tab-btn" id="voicetab-male" onclick="switchVoiceTab('male')">👨‍🏫 Claude（男性）</button>
+    </div>
+
+    <label class="form-label">声の種類（端末の音声から選択）</label>
+    <select id="voice-select" class="form-input" onchange="onVoicePreviewChange()"></select>
+    <div style="font-size:10px;color:var(--text3);margin:4px 0 14px">「en」で始まる英語の音声を選ぶと自然です。選べる音声はお使いの端末・ブラウザによって異なります。</div>
+
+    <label class="form-label">声の高さ（ピッチ）: <span id="voice-pitch-val">1.55</span></label>
+    <input type="range" id="voice-pitch" min="0" max="2" step="0.05" value="1.55" oninput="onVoicePitchInput()" style="width:100%;margin-bottom:14px">
+
+    <label class="form-label">話す速さ: <span id="voice-rate-val">0.75</span>x</label>
+    <input type="range" id="voice-rate" min="0.5" max="1.5" step="0.05" value="0.75" oninput="onVoiceRateInput()" style="width:100%;margin-bottom:16px">
+    <div style="font-size:10px;color:var(--text3);margin:-12px 0 16px">※速さは英会話画面の音声速度とも連動します。</div>
+
+    <label class="form-label">試聴テキスト</label>
+    <input type="text" id="voice-preview-text" class="form-input" value="Hello! Nice to meet you. Let's practice English together!" style="margin-bottom:10px">
+
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn-secondary" style="flex:1" onclick="previewVoice()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16l13 -8z" /></svg> 試聴する</button>
+      <button class="btn-secondary" style="flex:1" onclick="resetVoiceCurrent()">この先生をリセット</button>
+    </div>
+    <button class="btn-primary" style="width:100%" onclick="saveVoiceSettings()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2" /><path d="M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M14 4l0 4l-6 0l0 -4" /></svg> 保存して英会話に反映</button>
+  </div>
+</div>
+
 <!-- ═══════════════════ プロファイル編集モーダル ═══════════════════ -->
 <div class="modal-overlay" id="profile-edit-modal" onclick="if(event.target===this) closeProfileEdit()">
   <div class="modal">
@@ -723,6 +762,7 @@ const K = {
   P_SCORES:'lm_principle_scores', AUTO_LEARNED:'lm_auto_learned',
   VOICE_SPEED:'lm_voice_speed', MIC_PERMITTED:'lm_mic_permitted',
   SESSION_LOG:'lm_session_log',
+  VOICE_SETTINGS:'lm_voice_settings',
 };
 
 function escHtml(s) {
@@ -779,6 +819,85 @@ function openHelpModal() {
 }
 function closeHelpModal() {
   document.getElementById('modal-help').classList.remove('open');
+}
+
+// ── 音声調整モーダル ──
+var _voiceEditGender = 'female'; // 今編集中の先生
+var _voiceDraft = null;          // 未保存の編集内容(保存で確定)
+function openVoiceModal() {
+  _voiceDraft = JSON.parse(JSON.stringify(getVoiceSettings())); // 現在値を複製して編集用に
+  _voiceEditGender = 'female';
+  populateVoiceSelect();
+  switchVoiceTab('female');
+  document.getElementById('modal-voice').classList.add('open');
+}
+function closeVoiceModal() {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  document.getElementById('modal-voice').classList.remove('open');
+}
+function populateVoiceSelect() {
+  var sel = document.getElementById('voice-select');
+  if (!sel) return;
+  var voices = window.speechSynthesis.getVoices();
+  // 英語の音声を上に、その他を下に並べる
+  var en = voices.filter(function(v){ return v.lang.toLowerCase().indexOf('en') === 0; });
+  var other = voices.filter(function(v){ return v.lang.toLowerCase().indexOf('en') !== 0; });
+  var ordered = en.concat(other);
+  sel.innerHTML = '<option value="">（自動選択）</option>' + ordered.map(function(v){
+    return '<option value="' + escHtml(v.name) + '">' + escHtml(v.name + ' (' + v.lang + ')') + '</option>';
+  }).join('');
+}
+function switchVoiceTab(gender) {
+  _voiceEditGender = gender;
+  document.getElementById('voicetab-female').classList.toggle('active', gender === 'female');
+  document.getElementById('voicetab-male').classList.toggle('active', gender === 'male');
+  var cfg = _voiceDraft[gender];
+  document.getElementById('voice-select').value = cfg.voiceName || '';
+  document.getElementById('voice-pitch').value = cfg.pitch;
+  document.getElementById('voice-pitch-val').textContent = Number(cfg.pitch).toFixed(2);
+  var rate = getSpeed();
+  document.getElementById('voice-rate').value = rate;
+  document.getElementById('voice-rate-val').textContent = Number(rate).toFixed(2);
+}
+function onVoicePitchInput() {
+  var v = parseFloat(document.getElementById('voice-pitch').value);
+  document.getElementById('voice-pitch-val').textContent = v.toFixed(2);
+  _voiceDraft[_voiceEditGender].pitch = v;
+}
+function onVoiceRateInput() {
+  var v = parseFloat(document.getElementById('voice-rate').value);
+  document.getElementById('voice-rate-val').textContent = v.toFixed(2);
+}
+function onVoicePreviewChange() {
+  _voiceDraft[_voiceEditGender].voiceName = document.getElementById('voice-select').value;
+}
+function previewVoice() {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  var text = stripForSpeech(document.getElementById('voice-preview-text').value || 'Hello.');
+  var utt = new SpeechSynthesisUtterance(text);
+  utt.lang = 'en-US';
+  utt.pitch = _voiceDraft[_voiceEditGender].pitch;
+  utt.rate = parseFloat(document.getElementById('voice-rate').value);
+  var name = _voiceDraft[_voiceEditGender].voiceName;
+  var voices = window.speechSynthesis.getVoices();
+  var chosen = name ? voices.find(function(v){ return v.name === name; }) : pickVoiceForGender(_voiceEditGender, 'en-US');
+  if (chosen) utt.voice = chosen;
+  window.speechSynthesis.speak(utt);
+}
+function resetVoiceCurrent() {
+  var def = _voiceEditGender === 'female' ? {pitch:1.55, voiceName:''} : {pitch:0.75, voiceName:''};
+  _voiceDraft[_voiceEditGender] = def;
+  switchVoiceTab(_voiceEditGender);
+  showToast('この先生の音声設定を既定に戻しました（未保存）');
+}
+function saveVoiceSettings() {
+  LS.set(K.VOICE_SETTINGS, _voiceDraft);
+  // 話す速さ(共通)も保存し、英会話画面の速度設定と連動させる
+  var rate = parseFloat(document.getElementById('voice-rate').value);
+  applySpeed(rate);
+  showToast('音声設定を保存しました ✓ 英会話に反映されます');
+  closeVoiceModal();
 }
 function openSettingsModal() {
   document.getElementById('modal-settings').classList.add('open');
@@ -1357,9 +1476,30 @@ const MALE_VOICE_KEYWORDS   = ['male','man','daniel','alex','thomas','david','ri
 // 性別に最も合う音声を選ぶ。明示的にラベル付けされた音声が端末側に無い場合でも、
 // 同じ声に両方の先生がまとまってしまわないよう、利用可能な音声リスト内で
 // 男性/女性で別々の候補を割り当てる。
+// ── 音声設定(ピッチ・選択ボイス)の取得/保存 ──
+// 構造: { male:{pitch, voiceName}, female:{pitch, voiceName} }
+function getVoiceSettings() {
+  var s = LS.get(K.VOICE_SETTINGS) || {};
+  return {
+    male:   { pitch: (s.male   && typeof s.male.pitch   === 'number') ? s.male.pitch   : 0.75, voiceName: (s.male   && s.male.voiceName)   || '' },
+    female: { pitch: (s.female && typeof s.female.pitch === 'number') ? s.female.pitch : 1.55, voiceName: (s.female && s.female.voiceName) || '' },
+  };
+}
+function getVoicePitch(gender) {
+  var s = getVoiceSettings();
+  return gender === 'female' ? s.female.pitch : s.male.pitch;
+}
+
 function pickVoiceForGender(gender, lang) {
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
+  // 手動で選ばれたボイスがあれば最優先
+  const settings = getVoiceSettings();
+  const chosenName = gender === 'female' ? settings.female.voiceName : settings.male.voiceName;
+  if (chosenName) {
+    const exact = voices.find(v => v.name === chosenName);
+    if (exact) return exact;
+  }
   const langPrefix = (lang || 'en').slice(0, 2).toLowerCase();
   const langVoices = voices.filter(v => v.lang.toLowerCase().startsWith(langPrefix));
   const pool = langVoices.length ? langVoices : voices;
@@ -1387,17 +1527,30 @@ function cacheVoices() {
 window.speechSynthesis.onvoiceschanged = () => { cacheVoices(); };
 
 
+// 読み上げ用に、絵文字や記号などの「発音されると不自然な文字」を取り除く。
+// 字幕にはそのまま絵文字を残し、音声だけクリーンにするための処理。
+function stripForSpeech(text) {
+  if (!text) return '';
+  var t = text;
+  // 絵文字・装飾記号の主要ブロックを除去(サロゲートペア含む)
+  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u200D]/gu, ' ');
+  // 連続した空白を1つにまとめる
+  t = t.replace(/\s{2,}/g, ' ').trim();
+  return t;
+}
+
 function speakText(text) {
   if (!window.speechSynthesis) return;
+  var spoken = stripForSpeech(text);
+  if (!spoken) return; // 絵文字だけ等、読む中身が無ければ何もしない
   window.speechSynthesis.cancel();
-  const utt  = new SpeechSynthesisUtterance(text);
+  const utt  = new SpeechSynthesisUtterance(spoken);
   const char = selectedChar || {};
   const gender = char.voiceGender || 'male';
   utt.lang   = char.voiceLang   || 'en-US';
   utt.rate   = getSpeed();
-  // 同一音声しか無い端末でも男女差が分かるよう、ピッチの差を大きめに取る
-  // 女性教師はより若々しい声になるようピッチを高めに設定
-  utt.pitch  = gender === 'female' ? 1.55 : 0.75;
+  // ピッチは音声設定(保存値)があればそれを使い、無ければ性別ごとの既定値
+  utt.pitch  = getVoicePitch(gender);
 
   const best = pickVoiceForGender(gender, utt.lang);
   if (best) utt.voice = best;
