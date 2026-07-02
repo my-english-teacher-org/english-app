@@ -560,6 +560,8 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
         <div class="hint-text">通話中に「もっとゆっくり話して」と言うと自動調整されます</div>
       </div>
       <button class="cta-btn" onclick="saveSettings()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2" /><path d="M10 14a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M14 4l0 4l-6 0l0 -4" /></svg> 設定を保存</button>
+      <button class="btn-secondary" onclick="runConnectionTest()" id="conn-test-btn"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.785 6l8.215 8.215l-2.054 2.054a5.81 5.81 0 1 1 -8.215 -8.215l2.054 -2.054z" /><path d="M4 20l3.5 -3.5" /><path d="M15 4l-3.5 3.5" /><path d="M20 9l-3.5 3.5" /></svg> API接続テスト（つながらない時の診断）</button>
+      <div id="conn-test-result" style="display:none;margin-top:10px;padding:10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;font-size:11px;line-height:1.7;white-space:pre-wrap"></div>
     </div>
     <div class="section-label" style="margin-top:14px">利用状況</div>
     <div class="card" id="cost-detail-card">読み込み中...</div>
@@ -1010,6 +1012,57 @@ function loadSettings() {
   if (sv) sv.textContent = parseFloat(spd).toFixed(2) + 'x';
   renderCostCard();
 }
+// ── API接続テスト: どの段階で通信が失敗しているかを段階的に診断する ──
+async function runConnectionTest() {
+  var out = document.getElementById('conn-test-result');
+  var btn = document.getElementById('conn-test-btn');
+  out.style.display = 'block';
+  out.textContent = '診断中...';
+  if (btn) btn.disabled = true;
+  var lines = [];
+  var apiKey = LS.get(K.API_KEY) || '';
+
+  // テスト1: プリフライトが発生しない「単純リクエスト」でGoogleに届くか
+  //  (カスタムヘッダー無しのGET。エラー応答でも「読めれば」到達＋CORS応答はOKという意味)
+  try {
+    var r1 = await fetch('https://generativelanguage.googleapis.com/v1beta/models');
+    lines.push('① Googleへの到達(単純GET): OK (HTTP ' + r1.status + ')');
+  } catch (e1) {
+    lines.push('① Googleへの到達(単純GET): ✕ 失敗 — ' + (e1 && e1.message ? e1.message : e1));
+  }
+
+  // テスト2: プリフライト(OPTIONS)を伴うリクエストが通るか(実際のアプリと同じ経路)
+  try {
+    var r2 = await fetch('https://generativelanguage.googleapis.com/v1beta/models', { headers: { 'x-goog-api-key': apiKey || 'diagnostic' } });
+    lines.push('② プリフライトあり(ヘッダー付きGET): OK (HTTP ' + r2.status + ')');
+    if (r2.status === 401 || r2.status === 403) lines.push('   ※通信自体はOK。APIキーが無効/未設定の可能性(' + r2.status + ')');
+  } catch (e2) {
+    lines.push('② プリフライトあり(ヘッダー付きGET): ✕ 失敗 — ' + (e2 && e2.message ? e2.message : e2));
+  }
+
+  // テスト3: 実際の生成エンドポイントへのPOST(アプリの本番経路と同一)
+  try {
+    var r3 = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey || 'diagnostic' },
+      body: JSON.stringify({ contents: [{ role:'user', parts:[{text:'Say OK'}] }], generationConfig: { maxOutputTokens: 5 } })
+    });
+    lines.push('③ 生成API(POST): OK (HTTP ' + r3.status + ')');
+    if (r3.ok) lines.push('   → API通信は正常です！');
+  } catch (e3) {
+    lines.push('③ 生成API(POST): ✕ 失敗 — ' + (e3 && e3.message ? e3.message : e3));
+  }
+
+  // 判定ガイド
+  lines.push('');
+  lines.push('【見方】');
+  lines.push('・①から✕ → この端末/ネットワークからGoogleへの通信自体が遮断されています(VPN・プロキシ・セキュリティソフト・拡張機能などを確認)');
+  lines.push('・①OK ②✕ → プリフライト(OPTIONS)だけが遮断されています(セキュリティソフトやプロキシがOPTIONSをブロックしている可能性)');
+  lines.push('・②OK ③✕ → 生成エンドポイント固有の問題です(このまま結果を開発者に共有してください)');
+  out.textContent = lines.join('\n');
+  if (btn) btn.disabled = false;
+}
+
 function saveSettings() {
   var key = document.getElementById('set-api-key').value.trim();
   var err = document.getElementById('set-key-err');
