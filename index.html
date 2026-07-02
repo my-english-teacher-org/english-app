@@ -2381,16 +2381,16 @@ function startGeminiRecording() {
 // 無音区切りで呼ばれる: 録音を締め、発話があればGeminiに書き起こしてもらう。
 function finalizeGeminiSegment() {
   if (!_mediaRecorder || _mediaRecorder.state !== 'recording') { console.log('[STT] finalize skipped, recorder state=', _mediaRecorder && _mediaRecorder.state); return; }
-  var hadSpeech = _sawSpeech;
   var mime = _mediaRecorder.mimeType || 'audio/webm';
   _mediaRecorder.onstop = function() {
     var chunks = _audioChunks; _audioChunks = [];
-    console.log('[STT] recorder stopped, hadSpeech=', hadSpeech, 'chunks=', chunks.length);
+    console.log('[STT] recorder stopped, chunks=', chunks.length);
+    // 次の発話に備えてすぐ録音を再開(マイクONの間は録り続ける)
     if (callStarted && !micMuted && !_micHeldForSpeech) startGeminiRecording();
-    if (!hadSpeech || chunks.length === 0 || isLoading || micMuted || !callStarted) return;
+    if (chunks.length === 0 || isLoading || micMuted || !callStarted) { console.log('[STT] nothing to send'); return; }
     var blob = new Blob(chunks, {type: mime});
     console.log('[STT] blob size=', blob.size);
-    if (blob.size < 1200) { console.log('[STT] blob too small, skip'); return; }
+    if (blob.size < 800) { console.log('[STT] blob too small, skip'); return; }
     transcribeWithGemini(blob, mime);
   };
   try { _mediaRecorder.stop(); } catch(e) { console.log('[STT] stop error', e); }
@@ -2518,12 +2518,13 @@ function stopGeminiRecording() {
 }
 
 // ── 無音検知(VAD): マイク音量を監視し、発話→無音の切れ目で区切る ──
+var _vadInterval = null;
+var _lastSpeechAt = 0;
 function startVAD() {
   if (!_mediaStream) { console.log('[VAD] no mediaStream'); return; }
   try {
     _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    // ブラウザはユーザー操作なしだとAudioContextをsuspend状態にする。明示的にresumeする。
-    if (_audioCtx.state === 'suspended') { _audioCtx.resume().then(function(){ console.log('[VAD] audioCtx resumed'); }); }
+    if (_audioCtx.state === 'suspended') { _audioCtx.resume(); }
     var src = _audioCtx.createMediaStreamSource(_mediaStream);
     _analyser = _audioCtx.createAnalyser();
     _analyser.fftSize = 512;
@@ -2531,34 +2532,36 @@ function startVAD() {
     console.log('[VAD] started, ctx state=', _audioCtx.state);
   } catch (e) { console.log('[VAD] init error', e); return; }
   var buf = new Uint8Array(_analyser.frequencyBinCount);
-  var SPEECH_THRESHOLD = 10; // これ以上の音量で「発話中」とみなす
-  var _logCount = 0;
-  function tick() {
-    if (micMuted || !_analyser) { console.log('[VAD] tick stop (muted or no analyser)'); return; }
+  var SPEECH_THRESHOLD = 10;
+  _lastSpeechAt = 0;
+  // requestAnimationFrameはタブが非アクティブだと止まるため、setIntervalで安定監視する。
+  if (_vadInterval) clearInterval(_vadInterval);
+  _vadInterval = setInterval(function() {
+    if (micMuted || !_analyser) return;
+    if (_micHeldForSpeech || _transcribing || isLoading) return; // AI発話中・処理中は監視しない
     _analyser.getByteFrequencyData(buf);
     var sum = 0;
     for (var i = 0; i < buf.length; i++) sum += buf[i];
     var avg = sum / buf.length;
-    // 最初の数十フレームだけ音量ログを出す(マイクが拾えているか確認用)
-    if (_logCount < 40) { _logCount++; if (_logCount % 10 === 0) console.log('[VAD] avg volume=', avg.toFixed(1), 'ctx=', _audioCtx && _audioCtx.state); }
-    if (!_micHeldForSpeech && !_transcribing && !isLoading) {
-      if (avg > SPEECH_THRESHOLD) {
-        if (!_sawSpeech) console.log('[VAD] speech detected, avg=', avg.toFixed(1));
-        _sawSpeech = true;
-        var live = document.getElementById('speech-live');
-        if (live) live.textContent = '🎤 ...';
-        if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
-      } else if (_sawSpeech && !_silenceTimer) {
-        _silenceTimer = setTimeout(function() {
-          _silenceTimer = null;
-          console.log('[VAD] silence -> finalize segment');
-          finalizeGeminiSegment();
-        }, getSilenceMs());
-      }
+    var now = Date.now();
+    if (avg > SPEECH_THRESHOLD) {
+      if (!_sawSpeech) console.log('[VAD] speech start');
+      _sawSpeech = true;
+      _lastSpeechAt = now;
+      var live = document.getElementById('speech-live');
+      if (live) live.textContent = '🎤 ...';
+    } else if (_sawSpeech && _lastSpeechAt && (now - _lastSpeechAt) >= getSilenceMs()) {
+      // 発話後、無音が設定時間ぶん続いた → 区切って書き起こしへ
+      console.log('[VAD] silence', (now - _lastSpeechAt), 'ms -> finalize');
+      _sawSpeech = false; _lastSpeechAt = 0;
+      finalizeGeminiSegment();
     }
-    _vadRAF = requestAnimationFrame(tick);
-  }
-  _vadRAF = requestAnimationFrame(tick);
+  }, 100);
+}
+function stopVAD() {
+  if (_vadInterval) { clearInterval(_vadInterval); _vadInterval = null; }
+  _analyser = null;
+  if (_audioCtx) { try { _audioCtx.close(); } catch(e) {} _audioCtx = null; }
 }
 function stopVAD() {
   if (_vadRAF) { cancelAnimationFrame(_vadRAF); _vadRAF = null; }
