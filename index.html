@@ -518,12 +518,12 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
         <p style="font-size:12px;font-weight:500;color:var(--teal2);margin-bottom:8px">📋 APIキーの取得方法（無料）</p>
         <div class="api-step"><div class="api-step-num">1</div><div><div class="step-title">Google AI Studioを開く</div><div class="step-sub"><a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--teal2)">aistudio.google.com/apikey</a></div></div></div>
         <div class="api-step"><div class="api-step-num">2</div><div><div class="step-title">Googleアカウントでサインイン</div><div class="step-sub">GmailのIDとパスワードでOK</div></div></div>
-        <div class="api-step"><div class="api-step-num">3</div><div><div class="step-title">「Create API key」をクリック</div><div class="step-sub">「AIza...」で始まる文字列をコピーして下に貼り付け</div></div></div>
+        <div class="api-step"><div class="api-step-num">3</div><div><div class="step-title">「Create API key」をクリック</div><div class="step-sub">「AIza...」または「AQ...」で始まる文字列をコピーして下に貼り付け</div></div></div>
       </div>
       <div class="form-group">
         <label class="form-label">Gemini API キー <span class="req">*</span></label>
         <div class="input-wrap">
-          <input class="form-input" id="set-api-key" type="password" placeholder="AIza...">
+          <input class="form-input" id="set-api-key" type="password" placeholder="AIza... または AQ...">
           <button class="input-eye" onclick="toggleKeyEye()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="set-eye-icon"><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /><path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6" /></svg></button>
         </div>
         <div class="hint-text">キーは端末のみに保存。外部に送信されません。</div>
@@ -1285,26 +1285,40 @@ function renderProfSection(secId, items, canEdit) {
       <div class="prof-row-label">${item.label}</div>
       <div class="prof-row-val" id="profval-${item.key}">${escHtml(item.val)}</div>
       ${canEdit ? `<div class="prof-row-actions">
-        <button onclick="editProfItem('${item.key}','${escHtml(item.val)}')" title="編集"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" /><path d="M13.5 6.5l4 4" /></svg></button>
-        <button class="del" onclick="deleteProfItem('${item.key}')" title="削除"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg></button>
+        <button data-key="${escHtml(item.key)}" onclick="editProfItem(this.dataset.key)" title="編集"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" /><path d="M13.5 6.5l4 4" /></svg></button>
+        <button class="del" data-key="${escHtml(item.key)}" onclick="deleteProfItem(this.dataset.key)" title="削除"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg></button>
       </div>` : `<div class="prof-row-actions">
-        <button class="del" onclick="deleteProfItem('${item.key}')" title="削除"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg></button>
+        <button class="del" data-key="${escHtml(item.key)}" onclick="deleteProfItem(this.dataset.key)" title="削除"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg></button>
       </div>`}
     </div>`).join('');
 }
 
-function editProfItem(key, currentVal) {
+function editProfItem(key) {
   const row = document.getElementById('profrow-' + key);
   const valEl = document.getElementById('profval-' + key);
   if (!row || !valEl) return;
-  // インライン編集UI
-  valEl.innerHTML = `
-    <div class="inline-edit-wrap">
-      <input class="form-input" id="inline-inp-${key}" value="${escHtml(currentVal)}" type="text">
-      <button class="inline-edit-save" onclick="saveInlineEdit('${key}')">保存</button>
-      <button class="inline-edit-cancel" onclick="renderProfileTab()">✕</button>
-    </div>`;
-  document.getElementById('inline-inp-' + key)?.focus();
+  // 現在値はDOMのテキストから読む(onclick属性経由で値を渡すとXSSの経路になるため)
+  const currentVal = valEl.textContent || '';
+  // インライン編集UI(inputはDOM APIで構築し、値はプロパティとして設定する)
+  valEl.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'inline-edit-wrap';
+  const input = document.createElement('input');
+  input.className = 'form-input';
+  input.id = 'inline-inp-' + key;
+  input.type = 'text';
+  input.value = currentVal;
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'inline-edit-save';
+  saveBtn.textContent = '保存';
+  saveBtn.addEventListener('click', function() { saveInlineEdit(key); });
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'inline-edit-cancel';
+  cancelBtn.textContent = '✕';
+  cancelBtn.addEventListener('click', function() { renderProfileTab(); });
+  wrap.appendChild(input); wrap.appendChild(saveBtn); wrap.appendChild(cancelBtn);
+  valEl.appendChild(wrap);
+  input.focus();
 }
 
 function saveInlineEdit(key) {
@@ -1821,9 +1835,9 @@ async function sendInitialGreeting() {
       generationConfig: { temperature: 0.9, maxOutputTokens: 350 }
     };
     var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
     var _ac1 = new AbortController(); var _t1 = setTimeout(function(){ _ac1.abort(); }, 30000);
-    var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), signal: _ac1.signal });
+    var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json', 'x-goog-api-key': apiKey}, body: JSON.stringify(body), signal: _ac1.signal });
     clearTimeout(_t1);
     removeTypingFromCaption();
     if (!res.ok) { isLoading = false; document.getElementById('send-btn').disabled = false; fallbackGreeting(); return; }
@@ -1970,9 +1984,9 @@ function extractEarlyEnglish(partial) {
 // streamGenerateContentで逐次受信し、englishが確定した時点でonEarlyEnglishを1回だけ呼ぶ。
 // 戻り値は最終的な結合済みテキスト(rawText)とusageMetadata。
 async function streamGemini(model, apiKey, body, onEarlyEnglish) {
-  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':streamGenerateContent?alt=sse&key=' + apiKey;
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':streamGenerateContent?alt=sse';
   var _ac2 = new AbortController(); var _t2 = setTimeout(function(){ _ac2.abort(); }, 60000);
-  var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac2.signal});
+  var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', 'x-goog-api-key': apiKey}, body:JSON.stringify(body), signal: _ac2.signal});
   clearTimeout(_t2);
   if (!res.ok) return { ok:false, status:res.status, errData: await res.json().catch(function(){return {};}) };
   var reader = res.body.getReader();
@@ -2152,9 +2166,9 @@ async function teacherProactiveMessage() {
       contents: hist,
       generationConfig: {temperature:0.9, maxOutputTokens:400}
     };
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
     var _ac3 = new AbortController(); var _t3 = setTimeout(function(){ _ac3.abort(); }, 30000);
-    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac3.signal});
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', 'x-goog-api-key': apiKey}, body:JSON.stringify(body), signal: _ac3.signal});
     clearTimeout(_t3);
     removeTypingFromCaption();
     if (!res.ok) { isLoading = false; document.getElementById('send-btn').disabled = false; return; }
@@ -2437,9 +2451,9 @@ async function transcribeWithGemini(blob, mime) {
       ]}],
       generationConfig: { temperature: 0, maxOutputTokens: 200 }
     };
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
     var _ac4 = new AbortController(); var _t4 = setTimeout(function(){ _ac4.abort(); }, 30000);
-    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac4.signal});
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', 'x-goog-api-key': apiKey}, body:JSON.stringify(body), signal: _ac4.signal});
     clearTimeout(_t4);
     _transcribing = false;
     if (live) live.textContent = '';
