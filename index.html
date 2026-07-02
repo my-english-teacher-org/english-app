@@ -779,7 +779,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 <script>
 const LS = {
   get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
-  set: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) { console.warn('localStorage write failed:', k, e); } },
 };
 const K = {
   API_KEY:'lm_api_key', MODEL:'lm_model', TIER:'lm_tier', MONTHLY_LIMIT:'lm_monthly_limit',
@@ -797,7 +797,7 @@ const K = {
 };
 
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function levelLabel(v) {
   return {junior:'中学生レベル',senior:'高校生レベル',college:'大学生レベル',adult:'社会人レベル',business:'ビジネス英語'}[v]||v;
@@ -1663,7 +1663,7 @@ var _mediaRecorder = null;     // 録音用MediaRecorder
 var _audioChunks = [];         // 録音データの断片
 var _sawSpeech = false;        // 現在の録音区間で発話を検知したか(無音だけの録音を送らない)
 var _transcribing = false;     // Geminiに書き起こし依頼中か
-var _audioCtx = null, _analyser = null, _vadRAF = null; // 無音検知(VAD)用
+var _audioCtx = null, _analyser = null; // 無音検知(VAD)用
 var isLoading = false, callStarted = false;
 var recognition = null, micActive = false, micPermitted = null;
 var _replyTimer = null, _waitingReply = false;
@@ -1821,7 +1821,9 @@ async function sendInitialGreeting() {
     };
     var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
-    var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var _ac1 = new AbortController(); var _t1 = setTimeout(function(){ _ac1.abort(); }, 30000);
+    var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), signal: _ac1.signal });
+    clearTimeout(_t1);
     removeTypingFromCaption();
     if (!res.ok) { isLoading = false; document.getElementById('send-btn').disabled = false; fallbackGreeting(); return; }
     var data = await res.json();
@@ -1968,11 +1970,14 @@ function extractEarlyEnglish(partial) {
 // 戻り値は最終的な結合済みテキスト(rawText)とusageMetadata。
 async function streamGemini(model, apiKey, body, onEarlyEnglish) {
   var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':streamGenerateContent?alt=sse&key=' + apiKey;
-  var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  var _ac2 = new AbortController(); var _t2 = setTimeout(function(){ _ac2.abort(); }, 60000);
+  var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac2.signal});
+  clearTimeout(_t2);
   if (!res.ok) return { ok:false, status:res.status, errData: await res.json().catch(function(){return {};}) };
   var reader = res.body.getReader();
   var decoder = new TextDecoder();
   var buffer = '', rawText = '', usage = {}, firedEarly = false;
+  try {
   while (true) {
     var chunk = await reader.read();
     if (chunk.done) break;
@@ -1996,6 +2001,14 @@ async function streamGemini(model, apiKey, body, onEarlyEnglish) {
         }
       } catch (e) { /* 未完チャンクは無視 */ }
     }
+  }
+  } catch (streamErr) {
+    // ネットワーク切断等でストリームが途中で止まった場合、読み取れた分を返す
+    try { reader.cancel(); } catch(e) {}
+    if (rawText) return { ok:true, rawText:rawText, usage:usage };
+    throw streamErr;
+  } finally {
+    try { reader.releaseLock(); } catch(e) {}
   }
   return { ok:true, rawText:rawText, usage:usage };
 }
@@ -2024,11 +2037,13 @@ async function callGeminiForChat(retryCount) {
       if (result.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
         var waitSec = parseRetryDelaySeconds(errData) || Math.min(10 * (retryCount + 1), 40);
         showToast('レート制限のため ' + waitSec + '秒待って自動リトライします (' + (retryCount + 1) + '/6)', waitSec * 1000);
+        isLoading = false; document.getElementById('send-btn').disabled = false;
         setTimeout(function() { callGeminiForChat(retryCount + 1); }, waitSec * 1000);
         return;
       }
       if ((result.status === 500 || result.status === 503 || result.status === 504) && retryCount < 2) {
         showToast('サーバー混雑中のため少し待って自動リトライします...', 3000);
+        isLoading = false; document.getElementById('send-btn').disabled = false;
         setTimeout(function() { callGeminiForChat(retryCount + 1); }, 3000);
         return;
       }
@@ -2134,7 +2149,9 @@ async function teacherProactiveMessage() {
       generationConfig: {temperature:0.9, maxOutputTokens:400}
     };
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
-    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    var _ac3 = new AbortController(); var _t3 = setTimeout(function(){ _ac3.abort(); }, 30000);
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac3.signal});
+    clearTimeout(_t3);
     removeTypingFromCaption();
     if (!res.ok) { isLoading = false; document.getElementById('send-btn').disabled = false; return; }
     var data    = await res.json();
@@ -2333,7 +2350,7 @@ function initSpeechRecognition() {
   };
 }
 // 無音区切りに達したときの処理。エンジンに応じて分岐する。
-function flushSpeechBuffer() {
+async function flushSpeechBuffer() {
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
   var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
   if (useGemini) {
@@ -2347,7 +2364,7 @@ function flushSpeechBuffer() {
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '';
   if (!text || micMuted || isLoading || !callStarted) return;
-  sendMessage(text);
+  await sendMessage(text);
 }
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
 
@@ -2414,7 +2431,9 @@ async function transcribeWithGemini(blob, mime) {
       generationConfig: { temperature: 0, maxOutputTokens: 200 }
     };
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
-    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    var _ac4 = new AbortController(); var _t4 = setTimeout(function(){ _ac4.abort(); }, 30000);
+    var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac4.signal});
+    clearTimeout(_t4);
     _transcribing = false;
     if (live) live.textContent = '';
     if (!res.ok) {
@@ -2431,7 +2450,7 @@ async function transcribeWithGemini(blob, mime) {
     console.log('[STT] transcription result:', JSON.stringify(text));
     if (!text || /^\(?none\)?$/i.test(text)) { showToast('うまく聞き取れませんでした。もう一度話してください', 4000); return; }
     // 認識できたら会話に送る(この時点でミュートされていても、認識結果は無駄にしない)
-    if (callStarted && !isLoading) sendMessage(text);
+    if (callStarted && !isLoading) await sendMessage(text);
   } catch (e) {
     _transcribing = false;
     if (live) live.textContent = '';
@@ -2563,11 +2582,6 @@ function stopVAD() {
   _analyser = null;
   if (_audioCtx) { try { _audioCtx.close(); } catch(e) {} _audioCtx = null; }
 }
-function stopVAD() {
-  if (_vadRAF) { cancelAnimationFrame(_vadRAF); _vadRAF = null; }
-  _analyser = null;
-  if (_audioCtx) { try { _audioCtx.close(); } catch(e) {} _audioCtx = null; }
-}
 function updateMicUI() {
   var btn  = document.getElementById('btn-mic');
   var wrp  = document.getElementById('mic-icon-wrap');
@@ -2632,9 +2646,15 @@ function updateTokenCost(inTok, outTok, model) {
   updateUsagePanel();
 }
 function setHintChips(hints) {
-  document.getElementById('input-hints').innerHTML = hints.map(function(h) {
-    return '<span class="input-hint-chip" onclick="useHint(\'' + h.replace(/'/g, "&#39;") + '\')">' + h + '</span>';
-  }).join('');
+  var container = document.getElementById('input-hints');
+  container.innerHTML = '';
+  hints.forEach(function(h) {
+    var span = document.createElement('span');
+    span.className = 'input-hint-chip';
+    span.textContent = h;
+    span.addEventListener('click', function() { useHint(h); });
+    container.appendChild(span);
+  });
 }
 function useHint(text) { var inp = document.getElementById('chat-input'); inp.value = text; inp.focus(); autoResize(inp); }
 function chatKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
