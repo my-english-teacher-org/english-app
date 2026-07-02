@@ -883,10 +883,20 @@ function onRecogEngineChange() {
   var eng = document.getElementById('recog-engine-select').value || 'browser';
   LS.set(K.RECOG_ENGINE, eng);
   showToast(eng === 'gemini' ? '高精度認識(Gemini)に切り替えました' : '標準認識に切り替えました');
-  // 通話中に切り替えた場合、次の発話から反映される(録音状態を作り直す)
+  // 通話中かつマイクONで切り替えた場合は、旧エンジンを完全に止めてから新エンジンを起動する
   if (callStarted && !micMuted) {
-    if (eng === 'gemini') { ensureMediaRecorder().then(function(ok){ if (ok) startGeminiRecording(); }); }
-    else { stopGeminiRecording(); }
+    if (eng === 'gemini') {
+      // 標準→高精度: ブラウザ認識を止め、録音＋VADを開始
+      stopRecognition();
+      ensureMediaRecorder().then(function(ok){
+        if (ok) { startGeminiRecording(); startVAD(); }
+      });
+    } else {
+      // 高精度→標準: 録音とVADを止め、ブラウザ認識を起動
+      stopVAD();
+      stopGeminiRecording();
+      startRecognition();
+    }
   }
 }
 function onRecogLangChange() {
@@ -2608,6 +2618,10 @@ async function toggleMic() {
 function stopGeminiRecording() {
   try { if (_mediaRecorder && _mediaRecorder.state === 'recording') { _mediaRecorder.onstop = null; _mediaRecorder.stop(); } } catch(e) {}
   _audioChunks = [];
+  // 録音による「マイク使用中」フラグを確実に解除する。
+  // これを怠ると、高精度→標準に切り替えた際にmicActiveがtrueのまま残り、
+  // ブラウザ音声認識のstartRecognition()が常に早期returnして二度と起動しなくなる。
+  micActive = false;
 }
 
 // ── 無音検知(VAD): マイク音量を監視し、発話→無音の切れ目で区切る ──
