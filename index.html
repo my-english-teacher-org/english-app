@@ -1637,9 +1637,10 @@ function speakText(text) {
   if (best) utt.voice = best;
 
   // 実際の読み上げ開始/終了に合わせて口の動き＋マイクの一時停止/再開を連動させる
+  var _uttDone = false;
   utt.onstart = function() { setTalking(true); holdMicForSpeech(); };
-  utt.onend   = function() { setTalking(false); releaseMicAfterSpeech(); };
-  utt.onerror = function() { setTalking(false); releaseMicAfterSpeech(); };
+  utt.onend   = function() { if (_uttDone) return; _uttDone = true; setTalking(false); releaseMicAfterSpeech(); };
+  utt.onerror = function() { if (_uttDone) return; _uttDone = true; setTalking(false); releaseMicAfterSpeech(); };
 
   window.speechSynthesis.speak(utt);
 }
@@ -2123,6 +2124,9 @@ function explainApiError(msg) {
   if (/SAFETY|blocked/i.test(msg)) {
     return { en:'Content was blocked by safety filters.', jp:'内容が安全フィルターによりブロックされました。', short:'安全フィルターによるブロック' };
   }
+  if (/AbortError|aborted/i.test(msg)) {
+    return { en:'Request timed out. Please try again.', jp:'リクエストがタイムアウトしました。もう一度お試しください。', short:'タイムアウト' };
+  }
   if (/Failed to fetch|NetworkError|ERR_INTERNET/i.test(msg)) {
     return { en:'Network error. Please check your internet connection.', jp:'ネットワークエラーです。インターネット接続を確認してください。', short:'ネットワークエラー' };
   }
@@ -2313,6 +2317,9 @@ function initSpeechRecognition() {
     //   マイクデバイス解放を終えておらず「start→即end」のループに陥ることがある
     //   （Chromeの既知の癖）。わずかに間を空けてから再startすることでこれを回避する。
     if (callStarted && !micMuted) {
+      // Geminiモードでは録音+VADで音声認識するため、ブラウザ認識は再起動しない
+      var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
+      if (useGemini) return;
       setTimeout(function() {
         if (!callStarted || micMuted || micActive || _micHeldForSpeech) return;
         try { recognition.start(); } catch(e) {}
