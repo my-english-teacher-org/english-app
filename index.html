@@ -2505,7 +2505,11 @@ async function ensureMediaRecorder() {
 function startGeminiRecording() {
   if (!_mediaRecorder) return;
   _audioChunks = []; _sawSpeech = false;
-  try { if (_mediaRecorder.state === 'inactive') { _mediaRecorder.start(250); console.log('[STT] recording started, state=', _mediaRecorder.state); } } catch(e) { console.log('[STT] start error', e); }
+  // ★ timeslice指定(断片録音)をやめ、stop()時に一括で1つのBlobを受け取る方式にする。
+  //   端末・ブラウザによっては、細切れの断片を後から結合する過程で音声が
+  //   正しくつながらず、内部的に音声が重複してしまい、Gemini側で単語の
+  //   繰り返しとして書き起こされる不具合が起きることがあるため、この方式を回避する。
+  try { if (_mediaRecorder.state === 'inactive') { _mediaRecorder.start(); console.log('[STT] recording started, state=', _mediaRecorder.state); } } catch(e) { console.log('[STT] start error', e); }
   if (!micMuted) { micActive = true; document.getElementById('mic-indicator').classList.add('show'); }
 }
 // 無音区切りで呼ばれる: 録音を締め、発話があればGeminiに書き起こしてもらう。
