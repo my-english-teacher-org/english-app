@@ -2479,12 +2479,13 @@ function startRecognition() { if (!recognition || micActive) return; try { recog
 async function ensureMediaRecorder() {
   if (_mediaRecorder && _mediaStream && _mediaStream.active) return true;
   try {
-    // ★ echoCancellation等をtrue(既定)のままにすると、Android Chromeなどが
-    //   「通話中」とみなして音声出力を通話用の小さい音量ルートに自動的に
-    //   切り替えてしまうことがある。このアプリは先生の発話中はマイクを止める設計で
-    //   エコーキャンセレーションを必要としないため、明示的に無効化して回避する。
+    // ★ echoCancellationだけを無効化する。これがAndroid Chromeなどで「通話中」とみなされ
+    //   音声出力が小さい通話用ルートに切り替わる主因のため。
+    //   一方、noiseSuppression(ノイズ抑制)とautoGainControl(自動音量調整)は
+    //   音声認識(Gemini書き起こし)の精度に直結するため、有効なままにする
+    //   (以前これらも無効化したところ、認識結果が乱れる/単語が繰り返される不具合が出たため元に戻した)。
     _mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true }
     });
   } catch (e) {
     showToast('マイクを使用できませんでした', 5000);
@@ -2537,7 +2538,7 @@ async function transcribeWithGemini(blob, mime) {
     var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
     var body = {
       contents: [{ role:'user', parts: [
-        { text: 'Transcribe the spoken English in this audio exactly as said. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output the single word: (none)' },
+        { text: 'Transcribe the spoken English in this audio exactly as said, as clean natural text. Do NOT repeat or duplicate any word or phrase — each word should appear only as many times as it was actually spoken. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output the single word: (none)' },
         { inline_data: { mime_type: (mime.split(';')[0] || 'audio/webm'), data: base64 } }
       ]}],
       generationConfig: { temperature: 0, maxOutputTokens: 200 }
@@ -2559,6 +2560,7 @@ async function transcribeWithGemini(blob, mime) {
     updateTokenCost(um.promptTokenCount || 0, um.candidatesTokenCount || 0, model);
     var text = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
     text = text.replace(/^["'\s]+|["'\s]+$/g, '').trim();
+    text = collapseRepeatedWords(text);
     console.log('[STT] transcription result:', JSON.stringify(text));
     if (!text || /^\(?none\)?$/i.test(text)) { showToast('うまく聞き取れませんでした。もう一度話してください', 4000); return; }
     // 認識できたら会話に送る(この時点でミュートされていても、認識結果は無駄にしない)
@@ -2568,6 +2570,21 @@ async function transcribeWithGemini(blob, mime) {
     if (live) live.textContent = '';
     showToast('音声認識に失敗しました: ' + (e && e.message ? e.message : e), 6000);
   }
+}
+// Gemini書き起こしが稀に単語を連続で重複させることがあるため、安全策として除去する。
+// 例: "I I am walking walking now" -> "I am walking now"
+function collapseRepeatedWords(text) {
+  if (!text) return text;
+  var words = text.split(/\s+/);
+  var out = [];
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    var prev = out[out.length - 1];
+    // 直前と全く同じ単語(大文字小文字を無視)が連続する場合はスキップ
+    if (prev && w.toLowerCase().replace(/[.,!?]/g,'') === prev.toLowerCase().replace(/[.,!?]/g,'')) continue;
+    out.push(w);
+  }
+  return out.join(' ');
 }
 function blobToBase64(blob) {
   return new Promise(function(resolve, reject) {
