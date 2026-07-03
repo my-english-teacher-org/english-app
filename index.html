@@ -225,6 +225,14 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .speech-live{display:none;background:var(--surface2);border:1px solid var(--teal2);border-radius:12px;padding:9px 13px;margin-bottom:6px;font-size:14px;color:var(--text);min-height:20px;line-height:1.4}
 .speech-live.show{display:block}
 .speech-live:empty::before{content:"🎤 話しかけてください...";color:var(--text3);font-size:13px}
+.confirm-bubble{background:var(--surface2);border:1px solid var(--teal2);border-radius:12px;padding:10px 12px;margin-bottom:6px}
+.confirm-bubble-text{font-size:14px;color:var(--text);line-height:1.4;margin-bottom:8px;word-break:break-word}
+.confirm-bubble-actions{display:flex;gap:8px;align-items:center}
+.confirm-bubble-edit{flex:1;padding:7px 10px;background:var(--surface1);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;font-family:var(--font-b)}
+.confirm-bubble-btn{padding:7px 12px;border-radius:8px;border:none;font-size:12px;font-family:var(--font-b);cursor:pointer}
+.confirm-bubble-send{background:var(--teal2);color:#fff}
+.confirm-bubble-progress{height:3px;background:var(--teal2);border-radius:2px;margin-top:8px;animation:confirmProgress 2.5s linear forwards}
+@keyframes confirmProgress{from{width:100%}to{width:0%}}
 .input-hints{display:flex;gap:5px;margin-bottom:6px;flex-wrap:wrap}
 /* マイクON時は入力欄・ヒントを隠す(モバイルでキーボードが出て画面を覆う問題を防ぐ) */
 .mic-on-mode .input-row{display:none}
@@ -2628,8 +2636,10 @@ async function transcribeWithGemini(blob, mime) {
     text = collapseRepeatedWords(text);
     console.log('[STT] transcription result:', JSON.stringify(text));
     if (!text || /^\(?none\)?$/i.test(text)) { showToast('うまく聞き取れませんでした。もう一度話してください', 4000); return; }
-    // 認識できたら会話に送る(この時点でミュートされていても、認識結果は無駄にしない)
-    if (callStarted && !isLoading) await sendMessage(text);
+    // 認識できたら、すぐには送らず一瞬「確認」を挟む。
+    // AI音声認識は稀に単語を繰り返すなど誤認識することがあるため、
+    // 会話に反映される前にタップして直せる猶予を設ける。
+    if (callStarted) confirmAndSendRecognized(text);
   } catch (e) {
     _transcribing = false;
     if (live) live.textContent = '';
@@ -2667,6 +2677,63 @@ function collapseRepeatedWords(text) {
     if (!matched) { out.push(words[i]); i++; }
   }
   return out.join(' ');
+}
+// 認識結果を一瞬「確認」表示し、自動送信までの間にタップして直せるようにする。
+// 誤認識(単語の繰り返し等)が起きた場合、会話に混入する前に修正できる。
+var _confirmTimer = null;
+function confirmAndSendRecognized(text) {
+  _transcribing = true; // 確認中は次の発話の書き起こしを開始しない
+  var live = document.getElementById('speech-live');
+  if (!live) { sendMessage(text); _transcribing = false; return; }
+  live.innerHTML = '';
+  var bubble = document.createElement('div');
+  bubble.className = 'confirm-bubble';
+  var txt = document.createElement('div');
+  txt.className = 'confirm-bubble-text';
+  txt.textContent = text;
+  var actions = document.createElement('div');
+  actions.className = 'confirm-bubble-actions';
+  var editBtn = document.createElement('button');
+  editBtn.className = 'confirm-bubble-btn';
+  editBtn.style.background = 'var(--surface1)';
+  editBtn.style.color = 'var(--text2)';
+  editBtn.style.border = '1px solid var(--border2)';
+  editBtn.textContent = '✏️ 直す';
+  var sendBtn = document.createElement('button');
+  sendBtn.className = 'confirm-bubble-btn confirm-bubble-send';
+  sendBtn.textContent = '✓ 今すぐ送信';
+  var progress = document.createElement('div');
+  progress.className = 'confirm-bubble-progress';
+  actions.appendChild(editBtn); actions.appendChild(sendBtn);
+  bubble.appendChild(txt); bubble.appendChild(actions); bubble.appendChild(progress);
+  live.appendChild(bubble);
+
+  function finish(finalText) {
+    if (_confirmTimer) { clearTimeout(_confirmTimer); _confirmTimer = null; }
+    live.innerHTML = ''; live.textContent = '';
+    _transcribing = false;
+    if (finalText && finalText.trim() && callStarted && !isLoading) sendMessage(finalText.trim());
+  }
+  sendBtn.addEventListener('click', function() { finish(txt.textContent); });
+  editBtn.addEventListener('click', function() {
+    if (_confirmTimer) { clearTimeout(_confirmTimer); _confirmTimer = null; }
+    progress.remove();
+    txt.style.display = 'none';
+    var input = document.createElement('input');
+    input.type = 'text'; input.className = 'confirm-bubble-edit'; input.value = text;
+    bubble.insertBefore(input, actions);
+    input.focus(); input.select();
+    editBtn.remove();
+    var confirmEditBtn = document.createElement('button');
+    confirmEditBtn.className = 'confirm-bubble-btn confirm-bubble-send';
+    confirmEditBtn.textContent = '✓ 送信';
+    actions.insertBefore(confirmEditBtn, sendBtn);
+    sendBtn.remove();
+    confirmEditBtn.addEventListener('click', function() { finish(input.value); });
+    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') finish(input.value); });
+  });
+  // 2.5秒以内にタップされなければ自動的にそのまま送信する
+  _confirmTimer = setTimeout(function() { finish(text); }, 2500);
 }
 function blobToBase64(blob) {
   return new Promise(function(resolve, reject) {
