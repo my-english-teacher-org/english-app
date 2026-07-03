@@ -2479,13 +2479,15 @@ function startRecognition() { if (!recognition || micActive) return; try { recog
 async function ensureMediaRecorder() {
   if (_mediaStream && _mediaStream.active) return true;
   try {
-    // ★ echoCancellationだけを無効化する。これがAndroid Chromeなどで「通話中」とみなされ
-    //   音声出力が小さい通話用ルートに切り替わる主因のため。
-    //   一方、noiseSuppression(ノイズ抑制)とautoGainControl(自動音量調整)は
-    //   音声認識(Gemini書き起こし)の精度に直結するため、有効なままにする
-    //   (以前これらも無効化したところ、認識結果が乱れる/単語が繰り返される不具合が出たため元に戻した)。
+    // ★ echoCancellationは有効に戻す。
+    //   一度は「Android等で通話中とみなされ音量が下がる」対策として無効化したが、
+    //   無効にしたことで自分の声のわずかな反響(エコー)をマイクが拾い、
+    //   それがGeminiには「同じフレーズがもう一度話された」ように聞こえて、
+    //   単語やフレーズが繰り返し書き起こされる不具合の原因になっていた可能性が高い。
+    //   認識精度を優先してエコーキャンセレーションは有効に戻し、
+    //   音量低下については「AI音声調整」の再生音量スライダーで補ってもらう方針にする。
     _mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true }
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
   } catch (e) {
     showToast('マイクを使用できませんでした', 5000);
@@ -2634,18 +2636,35 @@ async function transcribeWithGemini(blob, mime) {
     showToast('音声認識に失敗しました: ' + (e && e.message ? e.message : e), 6000);
   }
 }
-// Gemini書き起こしが稀に単語を連続で重複させることがあるため、安全策として除去する。
-// 例: "I I am walking walking now" -> "I am walking now"
+// Gemini書き起こしが稀に単語やフレーズを連続で重複させることがあるため、安全策として除去する。
+// 単語単体の重複("I I am")だけでなく、フレーズ単位の重複("I don't I don't I don't walk")にも対応。
 function collapseRepeatedWords(text) {
   if (!text) return text;
   var words = text.split(/\s+/);
+  var norm = function(w){ return w.toLowerCase().replace(/[.,!?]/g,''); };
   var out = [];
-  for (var i = 0; i < words.length; i++) {
-    var w = words[i];
-    var prev = out[out.length - 1];
-    // 直前と全く同じ単語(大文字小文字を無視)が連続する場合はスキップ
-    if (prev && w.toLowerCase().replace(/[.,!?]/g,'') === prev.toLowerCase().replace(/[.,!?]/g,'')) continue;
-    out.push(w);
+  var i = 0;
+  while (i < words.length) {
+    var matched = false;
+    // 長いフレーズ(4語)から短いフレーズ(1語)まで、連続する繰り返しパターンを探す
+    for (var n = 4; n >= 1; n--) {
+      if (i + 2 * n > words.length) continue;
+      var seg1 = words.slice(i, i + n).map(norm).join(' ');
+      var seg2 = words.slice(i + n, i + 2 * n).map(norm).join(' ');
+      if (seg1 && seg1 === seg2) {
+        // 3回以上の繰り返しにも対応
+        var count = 2;
+        while (i + (count + 1) * n <= words.length &&
+               words.slice(i + count * n, i + (count + 1) * n).map(norm).join(' ') === seg1) {
+          count++;
+        }
+        out = out.concat(words.slice(i, i + n)); // 1回分だけ残す
+        i += count * n;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) { out.push(words[i]); i++; }
   }
   return out.join(' ');
 }
