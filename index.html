@@ -2534,6 +2534,51 @@ function finalizeGeminiSegment() {
   try { rec.stop(); } catch(e) { console.log('[STT] stop error', e); }
 }
 // 録音音声をGeminiに送ってテキスト化し、会話に流す。
+// 録音(WebM/Opus等)をGemini公式サポートのWAV形式に変換する。
+// WebMはGemini APIの公式サポート対象外(WAV/MP3/AIFF/AAC/OGG/FLACのみ)のため、
+// 未サポート形式のまま送っていたことが、書き起こしの乱れ(単語の重複)の
+// 原因になっていた可能性が高い。デコード→16bit PCM WAVへ再エンコードして送る。
+async function convertBlobToWav(blob) {
+  var arrayBuf = await blob.arrayBuffer();
+  var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  var DecodeCtx = new (window.AudioContext || window.webkitAudioContext)();
+  var audioBuffer;
+  try {
+    audioBuffer = await DecodeCtx.decodeAudioData(arrayBuf.slice(0));
+  } finally {
+    try { DecodeCtx.close(); } catch(e) {}
+  }
+  var numCh = audioBuffer.numberOfChannels;
+  var sampleRate = audioBuffer.sampleRate;
+  var length = audioBuffer.length;
+  // ステレオ等は簡易的にモノラルへダウンミックス(音声認識には十分)
+  var mono = new Float32Array(length);
+  for (var ch = 0; ch < numCh; ch++) {
+    var data = audioBuffer.getChannelData(ch);
+    for (var i = 0; i < length; i++) mono[i] += data[i] / numCh;
+  }
+  // 16bit PCM WAVヘッダー+データを組み立てる
+  var bytesPerSample = 2;
+  var blockAlign = bytesPerSample;
+  var byteRate = sampleRate * blockAlign;
+  var dataSize = length * bytesPerSample;
+  var buf = new ArrayBuffer(44 + dataSize);
+  var view = new DataView(buf);
+  function writeStr(offset, str) { for (var j = 0; j < str.length; j++) view.setUint8(offset + j, str.charCodeAt(j)); }
+  writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeStr(8, 'WAVE');
+  writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true);
+  writeStr(36, 'data'); view.setUint32(40, dataSize, true);
+  var off = 44;
+  for (var k = 0; k < length; k++) {
+    var s = Math.max(-1, Math.min(1, mono[k]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    off += 2;
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
 async function transcribeWithGemini(blob, mime) {
   var apiKey = LS.get(K.API_KEY);
   if (!apiKey) { showToast('APIキーが設定されていません', 5000); return; }
@@ -2542,14 +2587,24 @@ async function transcribeWithGemini(blob, mime) {
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '🎤 認識中...';
   try {
-    var base64 = await blobToBase64(blob);
+    // Gemini公式サポート形式(WAV)に変換してから送る
+    var wavBlob;
+    try {
+      wavBlob = await convertBlobToWav(blob);
+      console.log('[STT] converted to WAV, size=', wavBlob.size);
+    } catch (convErr) {
+      console.log('[STT] WAV conversion failed, sending original', convErr);
+      wavBlob = blob; // 変換に失敗した場合は元の形式でフォールバック送信
+    }
+    var base64 = await blobToBase64(wavBlob);
+    var sendMime = wavBlob.type || 'audio/wav';
     var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
     var body = {
       contents: [{ role:'user', parts: [
         { text: 'Transcribe the spoken English in this audio exactly as said, as clean natural text. Do NOT repeat or duplicate any word or phrase — each word should appear only as many times as it was actually spoken. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output the single word: (none)' },
-        { inline_data: { mime_type: (mime.split(';')[0] || 'audio/webm'), data: base64 } }
+        { inline_data: { mime_type: sendMime, data: base64 } }
       ]}],
-      generationConfig: { temperature: 0, maxOutputTokens: 200 }
+      generationConfig: { temperature: 0.1, maxOutputTokens: 200 }
     };
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
     var _ac4 = new AbortController(); var _t4 = setTimeout(function(){ _ac4.abort(); }, 30000);
