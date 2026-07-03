@@ -2475,9 +2475,9 @@ async function flushSpeechBuffer() {
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
 
 // ── Gemini音声認識モード: 録音とGeminiへの書き起こし ──
-// マイクのMediaStreamを確保し、MediaRecorderで録音を開始する。
+// マイクのMediaStreamを確保する(MediaRecorderインスタンス自体は発話ごとに新規作成する)。
 async function ensureMediaRecorder() {
-  if (_mediaRecorder && _mediaStream && _mediaStream.active) return true;
+  if (_mediaStream && _mediaStream.active) return true;
   try {
     // ★ echoCancellationだけを無効化する。これがAndroid Chromeなどで「通話中」とみなされ
     //   音声出力が小さい通話用ルートに切り替わる主因のため。
@@ -2491,35 +2491,39 @@ async function ensureMediaRecorder() {
     showToast('マイクを使用できませんでした', 5000);
     return false;
   }
-  var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-           : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
-           : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''));
-  try {
-    _mediaRecorder = mime ? new MediaRecorder(_mediaStream, {mimeType:mime}) : new MediaRecorder(_mediaStream);
-  } catch (e) {
-    _mediaRecorder = new MediaRecorder(_mediaStream);
-  }
-  _mediaRecorder.ondataavailable = function(ev) { if (ev.data && ev.data.size > 0) _audioChunks.push(ev.data); };
   return true;
 }
 function startGeminiRecording() {
-  if (!_mediaRecorder) return;
-  _audioChunks = []; _sawSpeech = false;
-  // ★ timeslice指定(断片録音)をやめ、stop()時に一括で1つのBlobを受け取る方式にする。
-  //   端末・ブラウザによっては、細切れの断片を後から結合する過程で音声が
-  //   正しくつながらず、内部的に音声が重複してしまい、Gemini側で単語の
-  //   繰り返しとして書き起こされる不具合が起きることがあるため、この方式を回避する。
-  try { if (_mediaRecorder.state === 'inactive') { _mediaRecorder.start(); console.log('[STT] recording started, state=', _mediaRecorder.state); } } catch(e) { console.log('[STT] start error', e); }
+  if (!_mediaStream) return;
+  _sawSpeech = false;
+  // ★ 録音デバイス(MediaRecorder)を発話のたびに毎回「新規作成」する。
+  //   以前は1つのMediaRecorderをstart()/stop()で使い回していたが、
+  //   停止処理は非同期のため、前の録音の末尾データが次の録音の先頭に
+  //   紛れ込む競合が起き、それが「同じ単語が二重に聞こえる」誤認識の
+  //   原因になっていた可能性が高い。毎回新しいインスタンスを使うことで、
+  //   録音セッション同士が状態を共有せず、この競合を構造的に無くす。
+  var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+           : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+           : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''));
+  var rec;
+  try { rec = mime ? new MediaRecorder(_mediaStream, {mimeType:mime}) : new MediaRecorder(_mediaStream); }
+  catch (e) { try { rec = new MediaRecorder(_mediaStream); } catch(e2) { console.log('[STT] recorder create error', e2); return; } }
+  var localChunks = []; // このセッション専用のバッファ(グローバル共有しない)
+  rec.ondataavailable = function(ev) { if (ev.data && ev.data.size > 0) localChunks.push(ev.data); };
+  rec.__localChunks = localChunks; // finalize時に取り出せるよう保持
+  try { rec.start(); console.log('[STT] recording started'); } catch(e) { console.log('[STT] start error', e); return; }
+  _mediaRecorder = rec;
   if (!micMuted) { micActive = true; document.getElementById('mic-indicator').classList.add('show'); }
 }
-// 無音区切りで呼ばれる: 録音を締め、発話があればGeminiに書き起こしてもらう。
+// 無音区切りで呼ばれる: 今の録音インスタンスを締め、発話があればGeminiに書き起こしてもらう。
 function finalizeGeminiSegment() {
-  if (!_mediaRecorder || _mediaRecorder.state !== 'recording') { console.log('[STT] finalize skipped, recorder state=', _mediaRecorder && _mediaRecorder.state); return; }
-  var mime = _mediaRecorder.mimeType || 'audio/webm';
-  _mediaRecorder.onstop = function() {
-    var chunks = _audioChunks; _audioChunks = [];
+  var rec = _mediaRecorder;
+  if (!rec || rec.state !== 'recording') { console.log('[STT] finalize skipped, recorder state=', rec && rec.state); return; }
+  var mime = rec.mimeType || 'audio/webm';
+  rec.onstop = function() {
+    var chunks = rec.__localChunks || [];
     console.log('[STT] recorder stopped, chunks=', chunks.length);
-    // 次の発話に備えてすぐ録音を再開(マイクONの間は録り続ける)
+    // 次の発話に備えて、新しい録音インスタンスをすぐ作って再開する(マイクONの間は録り続ける)
     if (callStarted && !micMuted && !_micHeldForSpeech) startGeminiRecording();
     if (chunks.length === 0 || isLoading || micMuted || !callStarted) { console.log('[STT] nothing to send'); return; }
     var blob = new Blob(chunks, {type: mime});
@@ -2527,7 +2531,7 @@ function finalizeGeminiSegment() {
     if (blob.size < 800) { console.log('[STT] blob too small, skip'); return; }
     transcribeWithGemini(blob, mime);
   };
-  try { _mediaRecorder.stop(); } catch(e) { console.log('[STT] stop error', e); }
+  try { rec.stop(); } catch(e) { console.log('[STT] stop error', e); }
 }
 // 録音音声をGeminiに送ってテキスト化し、会話に流す。
 async function transcribeWithGemini(blob, mime) {
