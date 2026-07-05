@@ -2512,13 +2512,15 @@ async function flushSpeechBuffer() {
   }
   // ブラウザモード: 認識済みテキストをそのまま送信
   var text = (_pendingFinal || '').trim();
-  sttDebug('>>> FLUSH sending="' + text + '" lastIdx=' + _lastProcessedResultIndex);
+  sttDebug('>>> FLUSH text="' + text + '" micMuted=' + micMuted + ' isLoading=' + isLoading + ' callStarted=' + callStarted);
   _pendingFinal = '';
-  // ★ continuous=true の間は e.results が累積し続けるので、
-  //    _lastProcessedResultIndex はリセットしない（onstart時にリセットされる）。
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '';
-  if (!text || micMuted || isLoading || !callStarted) return;
+  if (!text) { sttDebug('  -> skip: no text'); return; }
+  if (micMuted) { sttDebug('  -> skip: micMuted'); return; }
+  if (isLoading) { sttDebug('  -> skip: isLoading'); return; }
+  if (!callStarted) { sttDebug('  -> skip: call not started'); return; }
+  sttDebug('  -> calling sendMessage()');
   await sendMessage(text);
 }
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
