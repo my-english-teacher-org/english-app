@@ -464,6 +464,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
           </div>
         </div>
         <div class="speech-live" id="speech-live"></div>
+        <div id="stt-debug" style="display:none;background:#111;color:#0f0;font-size:10px;font-family:monospace;max-height:150px;overflow-y:auto;padding:5px;margin:5px 0;border-radius:4px;white-space:pre-wrap;word-break:break-all;"></div>
         <div class="input-hints" id="input-hints"></div>
         <div class="input-row" id="input-row">
           <textarea class="chat-textarea" id="chat-input" placeholder="英語で入力... (Enterで送信)" onkeydown="chatKey(event)" oninput="autoResize(this)" rows="1"></textarea>
@@ -1652,8 +1653,19 @@ var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var _silenceTimer = null;      // 無音区切りタイマー(話し終わりを検知して送信)
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
+var _lastProcessedResultIndex = 0; // 処理済みの最後のisFinal結果のインデックス（重複処理防止用）
+var _sttDebugEnabled = true; // デバッグログを画面表示するか（本番ではfalseにする）
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
 var SILENCE_MS = 2000;         // この時間ぶん無音が続いたらまとめて送信(既定2秒、設定で変更可)
+function sttDebug(msg) {
+  if (!_sttDebugEnabled) return;
+  var el = document.getElementById('stt-debug');
+  if (!el) return;
+  el.style.display = 'block';
+  var now = new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:2});
+  el.textContent = '[' + now + '] ' + msg + '\n' + el.textContent;
+  if (el.textContent.length > 3000) el.textContent = el.textContent.slice(0, 3000);
+}
 function getSilenceMs() {
   var v = parseInt(LS.get(K.SILENCE_MS), 10);
   return (v && v >= 800 && v <= 5000) ? v : SILENCE_MS;
@@ -1842,6 +1854,7 @@ async function sendInitialGreeting() {
     if (voiceEnabled && parsed.english) speakText(parsed.english);
     startReplyTimer();
   } catch (e) {
+    console.error('[openingGreeting] Error:', e.name, e.message, e);
     removeTypingFromCaption();
     fallbackGreeting();
   }
@@ -1971,10 +1984,22 @@ function extractEarlyEnglish(partial) {
 // 戻り値は最終的な結合済みテキスト(rawText)とusageMetadata。
 async function streamGemini(model, apiKey, body, onEarlyEnglish) {
   var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':streamGenerateContent?alt=sse&key=' + apiKey;
-  var _ac2 = new AbortController(); var _t2 = setTimeout(function(){ _ac2.abort(); }, 60000);
-  var res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac2.signal});
+  console.log('[streamGemini] Calling model:', model, 'URL length:', url.length);
+  var _ac2 = new AbortController(); var _t2 = setTimeout(function(){ console.warn('[streamGemini] Timeout (60s) - aborting'); _ac2.abort(); }, 60000);
+  var res;
+  try {
+    res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac2.signal});
+  } catch(fetchErr) {
+    clearTimeout(_t2);
+    console.error('[streamGemini] fetch failed:', fetchErr.name, fetchErr.message);
+    throw fetchErr;
+  }
   clearTimeout(_t2);
-  if (!res.ok) return { ok:false, status:res.status, errData: await res.json().catch(function(){return {};}) };
+  if (!res.ok) {
+    var errData = await res.json().catch(function(){return {};});
+    console.error('[streamGemini] HTTP error:', res.status, JSON.stringify(errData).substring(0, 200));
+    return { ok:false, status:res.status, errData: errData };
+  }
   var reader = res.body.getReader();
   var decoder = new TextDecoder();
   var buffer = '', rawText = '', usage = {}, firedEarly = false;
@@ -2027,14 +2052,16 @@ async function callGeminiForChat(retryCount) {
       generationConfig: {temperature:0.8, maxOutputTokens:350}
     };
     var spokenEarly = false;
-    var result = await streamGemini(model, apiKey, body, function(earlyEnglish) {
-      // englishが確定した瞬間に、字幕表示＋読み上げを先行して開始する(体感速度の改善)。
-      removeTypingFromCaption();
-      addCaption('ai', earlyEnglish, '', null);
-      if (voiceEnabled) { speakText(earlyEnglish); spokenEarly = true; }
-    });
-    if (!result.ok) {
-      var errData = result.errData || {};
+    // 非ストリーミングで呼び出す（CORS制約回避）
+    var chatUrl = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+    console.log('[callGeminiForChat] Calling model:', model);
+    var _ac5 = new AbortController(); var _t5 = setTimeout(function(){ console.warn('[callGeminiForChat] Timeout (60s)'); _ac5.abort(); }, 60000);
+    var chatRes = await fetch(chatUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: _ac5.signal});
+    clearTimeout(_t5);
+    if (!chatRes.ok) {
+      var errData = await chatRes.json().catch(function(){return {};});
+      console.error('[callGeminiForChat] HTTP error:', chatRes.status, JSON.stringify(errData).substring(0, 200));
+      var result = { ok:false, status:chatRes.status, errData:errData };
       if (result.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
         var waitSec = parseRetryDelaySeconds(errData) || Math.min(10 * (retryCount + 1), 40);
         showToast('レート制限のため ' + waitSec + '秒待って自動リトライします (' + (retryCount + 1) + '/6)', waitSec * 1000);
@@ -2051,9 +2078,10 @@ async function callGeminiForChat(retryCount) {
       removeTypingFromCaption();
       throw new Error((errData.error && errData.error.message) || ('HTTP ' + result.status + (result.status===429?' RESOURCE_EXHAUSTED':'')));
     }
+    var chatData = await chatRes.json();
     removeTypingFromCaption();
-    var rawText = result.rawText || '';
-    var usage   = result.usage || {};
+    var rawText = (chatData.candidates && chatData.candidates[0] && chatData.candidates[0].content && chatData.candidates[0].content.parts && chatData.candidates[0].content.parts[0] && chatData.candidates[0].content.parts[0].text) || '';
+    var usage   = chatData.usageMetadata || {};
     updateTokenCost(usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, model);
     var parsed;
     try {
@@ -2100,6 +2128,7 @@ async function callGeminiForChat(retryCount) {
     if (parsed.extract && Object.keys(parsed.extract).some(function(k) { return parsed.extract[k]; })) window.autoLearnFromChat(parsed.extract);
     startReplyTimer();
   } catch(e) {
+    console.error('[callGeminiForChat] Error:', e.name, e.message, e);
     removeTypingFromCaption();
     var friendly = explainApiError(e.message);
     addCaption('ai', '⚠️ ' + friendly.en, friendly.jp, null);
@@ -2305,6 +2334,10 @@ function initSpeechRecognition() {
   recognition.continuous = true;
   recognition.onstart = function() {
     micActive = true;
+    // 新しい認識セッション開始時にインデックスをリセット（e.resultsが空の新しい配列になるため）
+    _lastProcessedResultIndex = 0;
+    _pendingFinal = '';
+    sttDebug('=== onstart: reset lastIdx=0, pending cleared ===');
     if (micPermitted !== true) { micPermitted = true; LS.set(K.MIC_PERMITTED, true); }
     if (!micMuted) document.getElementById('mic-indicator').classList.add('show');
   };
@@ -2338,18 +2371,41 @@ function initSpeechRecognition() {
     if (micMuted || _micHeldForSpeech) return;
     if (isLoading || _transcribing) return; // AI応答生成中・書き起こし中は受け付けない
     var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
-    var interim = '';
-    for (var i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) _pendingFinal += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
+
+    // デバッグ: e.results の全内容をダンプ（画面表示）
+    var debugParts = [];
+    for (var d = 0; d < e.results.length; d++) {
+      debugParts.push(d + ':' + (e.results[d].isFinal ? 'F' : 'i') + '="' + e.results[d][0].transcript.slice(0,20) + '"');
     }
-    _sawSpeech = true; // 発話を検知(Geminiモードで無音だけの録音を送らないための印)
+    sttDebug('rIdx=' + e.resultIndex + ' last=' + _lastProcessedResultIndex + ' [' + debugParts.join(', ') + ']');
+
+    // ★ continuous=true では e.results に全履歴が累積される。
+    //    同じインデックスの結果が interim → isFinal に変化することがある。
+    //    処理済みインデックスを追跡し、isFinal になった時点で一度だけ追加する。
+    var newFinal = '';
+    var interim = '';
+    for (var i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        // このインデックスがまだ処理されていなければ追加
+        if (i >= _lastProcessedResultIndex) {
+          newFinal += e.results[i][0].transcript;
+          _lastProcessedResultIndex = i + 1;
+          sttDebug('  +FINAL idx=' + i + ': "' + e.results[i][0].transcript + '"');
+        }
+      } else {
+        // interim は累積せず、最新の未確定結果だけを使う
+        interim = e.results[i][0].transcript;
+      }
+    }
+    if (newFinal) {
+      _pendingFinal += newFinal;
+      sttDebug('  pending="' + _pendingFinal + '"');
+    }
+    _sawSpeech = true;
     var live = document.getElementById('speech-live');
     if (useGemini) {
-      // Geminiモードでは書き起こしはGeminiに任せるので、ここでは「認識中」表示だけ出す
       if (live) live.textContent = '🎤 ...';
     } else {
-      // ブラウザモードでは従来通り、認識テキストを途中経過として表示
       if (live) live.textContent = (_pendingFinal + ' ' + interim).trim();
     }
     if (_silenceTimer) clearTimeout(_silenceTimer);
@@ -2367,7 +2423,10 @@ async function flushSpeechBuffer() {
   }
   // ブラウザモード: 認識済みテキストをそのまま送信
   var text = (_pendingFinal || '').trim();
+  sttDebug('>>> FLUSH sending="' + text + '" lastIdx=' + _lastProcessedResultIndex);
   _pendingFinal = '';
+  // ★ continuous=true の間は e.results が累積し続けるので、
+  //    _lastProcessedResultIndex はリセットしない（onstart時にリセットされる）。
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '';
   if (!text || micMuted || isLoading || !callStarted) return;
@@ -2479,7 +2538,7 @@ function holdMicForSpeech() {
   if (micMuted || _micHeldForSpeech) return;
   _micHeldForSpeech = true;
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
-  _pendingFinal = ''; _sawSpeech = false;
+  _pendingFinal = ''; _sawSpeech = false; _lastProcessedResultIndex = 0;
   var inp = document.getElementById('chat-input');
   if (inp) { inp.value = ''; autoResize(inp); }
   var live = document.getElementById('speech-live');
@@ -2495,7 +2554,7 @@ function releaseMicAfterSpeech() {
   if (!_micHeldForSpeech) return;
   _micHeldForSpeech = false;
   setTimeout(function() {
-    _pendingFinal = ''; _sawSpeech = false;
+    _pendingFinal = ''; _sawSpeech = false; _lastProcessedResultIndex = 0;
     if (callStarted && !micMuted && !micActive && !_micHeldForSpeech) {
       var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
       if (useGemini) {
@@ -2532,7 +2591,7 @@ async function toggleMic() {
     document.getElementById('mic-indicator').classList.remove('show');
     showToast('ミュートにしました 🔇');
     if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
-    _pendingFinal = ''; _micHeldForSpeech = false; _sawSpeech = false;
+    _pendingFinal = ''; _micHeldForSpeech = false; _sawSpeech = false; _lastProcessedResultIndex = 0;
     stopRecognition();
     stopVAD();
     stopGeminiRecording();
