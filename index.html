@@ -2462,43 +2462,40 @@ function initSpeechRecognition() {
     if (isLoading || _transcribing) return; // AI応答生成中・書き起こし中は受け付けない
     var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
 
-    // デバッグ: e.results の全内容をダンプ（画面表示）
-    var debugParts = [];
-    for (var d = 0; d < e.results.length; d++) {
-      debugParts.push(d + ':' + (e.results[d].isFinal ? 'F' : 'i') + '="' + e.results[d][0].transcript.slice(0,15) + '"');
-    }
-    sttDebug('rIdx=' + e.resultIndex + ' last=' + _lastProcessedResultIndex + ' [' + debugParts.join(', ') + ']');
-
-    // ★ continuous=true では e.results に全履歴が累積される。
-    //    同じインデックスの結果が interim → isFinal に変化することがある。
-    //    処理済みインデックスを追跡し、isFinal になった時点で一度だけ追加する。
-    var newFinal = '';
+    // ★ スマホブラウザの異常動作対策:
+    //    一部のスマホでは、中間結果が出るたびに新しいインデックスが作られ、
+    //    すべてがisFinal=trueになる（例: idx0="good", idx1="good evening", ...）。
+    //    この場合、各インデックスを蓄積すると重複してしまう。
+    //    対策: 最後のisFinal結果のみを使用し、それ以前の結果は上書きする。
+    var lastFinalText = '';
     var interim = '';
+    var lastFinalIdx = -1;
     for (var i = 0; i < e.results.length; i++) {
       if (e.results[i].isFinal) {
-        // このインデックスがまだ処理されていなければ追加
-        if (i >= _lastProcessedResultIndex) {
-          newFinal += e.results[i][0].transcript;
-          _lastProcessedResultIndex = i + 1;
-          sttDebug('  +FINAL idx=' + i + ': "' + e.results[i][0].transcript + '"');
-        }
+        // 最後のisFinal結果で上書き（蓄積しない）
+        lastFinalText = e.results[i][0].transcript;
+        lastFinalIdx = i;
       } else {
-        // interim は累積せず、最新の未確定結果だけを使う
         interim = e.results[i][0].transcript;
       }
     }
-    if (newFinal) {
-      _pendingFinal += newFinal;
-      sttDebug('  pending="' + _pendingFinal + '"');
+
+    // デバッグログ
+    sttDebug('rIdx=' + e.resultIndex + ' lastFinalIdx=' + lastFinalIdx + ' text="' + (lastFinalText || interim).slice(0,30) + '"');
+
+    // 最後のFinal結果を_pendingFinalとして設定（蓄積ではなく上書き）
+    if (lastFinalText) {
+      _pendingFinal = lastFinalText;
+      sttDebug('  -> pending(overwrite)="' + _pendingFinal + '"');
     }
-    _sawSpeech = true; // 発話を検知(Geminiモードで無音だけの録音を送らないための印)
+
+    _sawSpeech = true;
     var live = document.getElementById('speech-live');
     if (useGemini) {
-      // Geminiモードでは書き起こしはGeminiに任せるので、ここでは「認識中」表示だけ出す
       if (live) live.textContent = '🎤 ...';
     } else {
-      // ブラウザモードでは従来通り、認識テキストを途中経過として表示
-      if (live) live.textContent = (_pendingFinal + ' ' + interim).trim();
+      // 表示は最新のFinalまたはinterim
+      if (live) live.textContent = (lastFinalText || interim).trim();
     }
     if (_silenceTimer) clearTimeout(_silenceTimer);
     _silenceTimer = setTimeout(flushSpeechBuffer, getSilenceMs());
