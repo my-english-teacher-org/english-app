@@ -472,6 +472,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
           </div>
         </div>
         <div class="speech-live" id="speech-live"></div>
+        <div id="stt-debug" style="display:none;background:#111;color:#0f0;font-size:10px;font-family:monospace;max-height:150px;overflow-y:auto;padding:5px;margin:5px 0;border-radius:4px;white-space:pre-wrap;word-break:break-all;"></div>
         <div class="input-hints" id="input-hints"></div>
         <div class="input-row" id="input-row">
           <textarea class="chat-textarea" id="chat-input" placeholder="英語で入力... (Enterで送信)" onkeydown="chatKey(event)" oninput="autoResize(this)" rows="1"></textarea>
@@ -1759,8 +1760,19 @@ var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var _silenceTimer = null;      // 無音区切りタイマー(話し終わりを検知して送信)
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
+var _lastProcessedResultIndex = 0; // 処理済みの最後のisFinal結果のインデックス（重複処理防止用）
+var _sttDebugEnabled = true; // デバッグログを画面表示するか（本番ではfalseにする）
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
 var SILENCE_MS = 2000;         // この時間ぶん無音が続いたらまとめて送信(既定2秒、設定で変更可)
+function sttDebug(msg) {
+  if (!_sttDebugEnabled) return;
+  var el = document.getElementById('stt-debug');
+  if (!el) return;
+  el.style.display = 'block';
+  var now = new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:2});
+  el.textContent = '[' + now + '] ' + msg + '\n' + el.textContent;
+  if (el.textContent.length > 3000) el.textContent = el.textContent.slice(0, 3000);
+}
 function getSilenceMs() {
   var v = parseInt(LS.get(K.SILENCE_MS), 10);
   return (v && v >= 800 && v <= 5000) ? v : SILENCE_MS;
@@ -2412,6 +2424,10 @@ function initSpeechRecognition() {
   recognition.continuous = true;
   recognition.onstart = function() {
     micActive = true;
+    // 新しい認識セッション開始時にインデックスとバッファをリセット
+    _lastProcessedResultIndex = 0;
+    _pendingFinal = '';
+    sttDebug('=== onstart: reset lastIdx=0, pending cleared ===');
     if (micPermitted !== true) { micPermitted = true; LS.set(K.MIC_PERMITTED, true); }
     if (!micMuted) document.getElementById('mic-indicator').classList.add('show');
   };
@@ -2445,10 +2461,35 @@ function initSpeechRecognition() {
     if (micMuted || _micHeldForSpeech) return;
     if (isLoading || _transcribing) return; // AI応答生成中・書き起こし中は受け付けない
     var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
+
+    // デバッグ: e.results の全内容をダンプ（画面表示）
+    var debugParts = [];
+    for (var d = 0; d < e.results.length; d++) {
+      debugParts.push(d + ':' + (e.results[d].isFinal ? 'F' : 'i') + '="' + e.results[d][0].transcript.slice(0,15) + '"');
+    }
+    sttDebug('rIdx=' + e.resultIndex + ' last=' + _lastProcessedResultIndex + ' [' + debugParts.join(', ') + ']');
+
+    // ★ continuous=true では e.results に全履歴が累積される。
+    //    同じインデックスの結果が interim → isFinal に変化することがある。
+    //    処理済みインデックスを追跡し、isFinal になった時点で一度だけ追加する。
+    var newFinal = '';
     var interim = '';
-    for (var i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) _pendingFinal += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
+    for (var i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        // このインデックスがまだ処理されていなければ追加
+        if (i >= _lastProcessedResultIndex) {
+          newFinal += e.results[i][0].transcript;
+          _lastProcessedResultIndex = i + 1;
+          sttDebug('  +FINAL idx=' + i + ': "' + e.results[i][0].transcript + '"');
+        }
+      } else {
+        // interim は累積せず、最新の未確定結果だけを使う
+        interim = e.results[i][0].transcript;
+      }
+    }
+    if (newFinal) {
+      _pendingFinal += newFinal;
+      sttDebug('  pending="' + _pendingFinal + '"');
     }
     _sawSpeech = true; // 発話を検知(Geminiモードで無音だけの録音を送らないための印)
     var live = document.getElementById('speech-live');
@@ -2474,7 +2515,10 @@ async function flushSpeechBuffer() {
   }
   // ブラウザモード: 認識済みテキストをそのまま送信
   var text = (_pendingFinal || '').trim();
+  sttDebug('>>> FLUSH sending="' + text + '" lastIdx=' + _lastProcessedResultIndex);
   _pendingFinal = '';
+  // ★ continuous=true の間は e.results が累積し続けるので、
+  //    _lastProcessedResultIndex はリセットしない（onstart時にリセットされる）。
   var live = document.getElementById('speech-live');
   if (live) live.textContent = '';
   if (!text || micMuted || isLoading || !callStarted) return;
