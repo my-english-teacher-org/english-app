@@ -1758,9 +1758,8 @@ function speakText(text) {
 var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = false;
 var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
-var _silenceTimer = null;      // 無音区切りタイマー(話し終わりを検知して送信)
+var _silenceTimer = null;      // 無音区切りタイマー(Geminiモード用)
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
-var _lastProcessedResultIndex = 0; // 処理済みの最後のisFinal結果のインデックス（重複処理防止用）
 var _sttDebugEnabled = true; // デバッグログを画面表示するか（本番ではfalseにする）
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
 var SILENCE_MS = 2000;         // この時間ぶん無音が続いたらまとめて送信(既定2秒、設定で変更可)
@@ -2415,78 +2414,96 @@ function initSpeechRecognition() {
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
   recognition = new SR();
-  recognition.lang = LS.get(K.RECOG_LANG) || 'en-US'; recognition.interimResults = true;
-  recognition.maxAlternatives = 3; // 複数候補を取得して、より確からしい認識結果を選べるようにする
-  // ★ https化(GitHub Pages)によりブラウザがオリジン単位でマイク許可を記憶するようになったため、
-  //   以前の「1発話ごとに終了→即再start」という回避策(continuous=false)は不要かつ有害
-  //   （終了〜再startの一瞬の空白で発話の頭が拾われない／再startが失敗する原因になっていた）。
-  //   そのため continuous=true にして、許可後はセッションを維持したまま聞き続ける形にする。
-  recognition.continuous = true;
+  recognition.lang = LS.get(K.RECOG_LANG) || 'en-US';
+  recognition.interimResults = true;
+  // ★ 推奨実装: continuous=false（発話ごとにセッション終了→再開）
+  //    continuous=trueはモバイルブラウザで問題が多い:
+  //    - iOSでは完全に使えない
+  //    - Chromeでは結果が無限に蓄積される
+  //    参考: https://webreflection.medium.com/taming-the-web-speech-api-ef64f5a245e1
+  recognition.continuous = false;
+
   recognition.onstart = function() {
     micActive = true;
-    // 新しい認識セッション開始時にインデックスとバッファをリセット
-    _lastProcessedResultIndex = 0;
     _pendingFinal = '';
-    sttDebug('=== onstart: reset lastIdx=0, pending cleared ===');
+    sttDebug('=== onstart ===');
     if (micPermitted !== true) { micPermitted = true; LS.set(K.MIC_PERMITTED, true); }
     if (!micMuted) document.getElementById('mic-indicator').classList.add('show');
   };
+
   recognition.onend = function() {
-    micActive = false; document.getElementById('mic-indicator').classList.remove('show');
-    // 読み上げ中に意図的に止めた場合(_micHeldForSpeech)は、ここでは再開しない。
-    // 再開は読み上げ終了時のreleaseMicAfterSpeech()に一本化する。
-    if (_micHeldForSpeech) return;
-    // ★ onend直後に同期でrecognition.start()すると、ブラウザが前回セッションの
-    //   マイクデバイス解放を終えておらず「start→即end」のループに陥ることがある
-    //   （Chromeの既知の癖）。わずかに間を空けてから再startすることでこれを回避する。
-    if (callStarted && !micMuted) {
-      // Geminiモードでは録音+VADで音声認識するため、ブラウザ認識は再起動しない
+    micActive = false;
+    document.getElementById('mic-indicator').classList.remove('show');
+    sttDebug('=== onend ===');
+
+    // continuous=falseなので、発話終了でonendが呼ばれる。
+    // _pendingFinalにテキストがあれば送信し、その後マイクを再開する。
+    if (_pendingFinal && !_micHeldForSpeech && !micMuted && callStarted && !isLoading) {
+      var text = _pendingFinal.trim();
+      _pendingFinal = '';
+      sttDebug('>>> onend sending="' + text + '"');
+      if (text) {
+        sendMessage(text).then(function() {
+          // 送信完了後、マイクを再開（AIの応答待ち中は再開しない→releaseMicAfterSpeechで再開）
+        });
+      }
+    }
+
+    // マイクがONで、AIが話していなければ再開
+    if (!_micHeldForSpeech && callStarted && !micMuted) {
       var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
       if (useGemini) return;
       setTimeout(function() {
         if (!callStarted || micMuted || micActive || _micHeldForSpeech) return;
-        try { recognition.start(); } catch(e) {}
+        sttDebug('=== restart recognition ===');
+        try { recognition.start(); } catch(e) { sttDebug('restart error: ' + e.message); }
       }, 300);
     }
   };
+
   recognition.onerror = function(e) {
     document.getElementById('mic-indicator').classList.remove('show');
+    sttDebug('=== onerror: ' + e.error + ' ===');
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       micActive = false; micMuted = true; micPermitted = false;
       LS.set(K.MIC_PERMITTED, false); updateMicUI();
       showToast('マイクへのアクセスが拒否されました', 6000);
     }
+    // no-speech エラーの場合は静かに再開
+    if (e.error === 'no-speech' && callStarted && !micMuted && !_micHeldForSpeech) {
+      var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
+      if (!useGemini) {
+        setTimeout(function() {
+          if (!callStarted || micMuted || micActive || _micHeldForSpeech) return;
+          try { recognition.start(); } catch(ex) {}
+        }, 300);
+      }
+    }
   };
+
   recognition.onresult = function(e) {
     if (micMuted || _micHeldForSpeech) return;
-    if (isLoading || _transcribing) return; // AI応答生成中・書き起こし中は受け付けない
+    if (isLoading || _transcribing) return;
     var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
 
-    // ★ スマホブラウザの異常動作対策:
-    //    一部のスマホでは、中間結果が出るたびに新しいインデックスが作られ、
-    //    すべてがisFinal=trueになる（例: idx0="good", idx1="good evening", ...）。
-    //    この場合、各インデックスを蓄積すると重複してしまう。
-    //    対策: 最後のisFinal結果のみを使用し、それ以前の結果は上書きする。
-    var lastFinalText = '';
+    // continuous=falseでは、e.resultsは通常1つの結果のみ
+    // 最後の結果を取得（isFinalかどうかに関わらず最新を表示用に使う）
+    var finalText = '';
     var interim = '';
-    var lastFinalIdx = -1;
     for (var i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        // 最後のisFinal結果で上書き（蓄積しない）
-        lastFinalText = e.results[i][0].transcript;
-        lastFinalIdx = i;
+      var result = e.results[i];
+      if (result.isFinal) {
+        finalText = result[0].transcript;
       } else {
-        interim = e.results[i][0].transcript;
+        interim = result[0].transcript;
       }
     }
 
-    // デバッグログ
-    sttDebug('rIdx=' + e.resultIndex + ' lastFinalIdx=' + lastFinalIdx + ' text="' + (lastFinalText || interim).slice(0,30) + '"');
+    sttDebug('result: final="' + finalText.slice(0,30) + '" interim="' + interim.slice(0,30) + '"');
 
-    // 最後のFinal結果を_pendingFinalとして設定（蓄積ではなく上書き）
-    if (lastFinalText) {
-      _pendingFinal = lastFinalText;
-      sttDebug('  -> pending(overwrite)="' + _pendingFinal + '"');
+    // Finalがあれば保存（onendで送信される）
+    if (finalText) {
+      _pendingFinal = finalText;
     }
 
     _sawSpeech = true;
@@ -2495,33 +2512,21 @@ function initSpeechRecognition() {
       if (live) live.textContent = '🎤 ...';
     } else {
       // 表示は最新のFinalまたはinterim
-      if (live) live.textContent = (lastFinalText || interim).trim();
+      if (live) live.textContent = (finalText || interim).trim();
     }
-    if (_silenceTimer) clearTimeout(_silenceTimer);
-    _silenceTimer = setTimeout(flushSpeechBuffer, getSilenceMs());
   };
 }
-// 無音区切りに達したときの処理。エンジンに応じて分岐する。
+// 無音区切りに達したときの処理（Geminiモード専用）。
+// ブラウザモードではcontinuous=falseなのでonendで送信するため、この関数は使わない。
 async function flushSpeechBuffer() {
   if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
   var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
   if (useGemini) {
     // Geminiモード: 録音を締めてGeminiに書き起こしてもらう
     finalizeGeminiSegment();
-    return;
   }
-  // ブラウザモード: 認識済みテキストをそのまま送信
-  var text = (_pendingFinal || '').trim();
-  sttDebug('>>> FLUSH text="' + text + '" micMuted=' + micMuted + ' isLoading=' + isLoading + ' callStarted=' + callStarted);
-  _pendingFinal = '';
-  var live = document.getElementById('speech-live');
-  if (live) live.textContent = '';
-  if (!text) { sttDebug('  -> skip: no text'); return; }
-  if (micMuted) { sttDebug('  -> skip: micMuted'); return; }
-  if (isLoading) { sttDebug('  -> skip: isLoading'); return; }
-  if (!callStarted) { sttDebug('  -> skip: call not started'); return; }
-  sttDebug('  -> calling sendMessage()');
-  await sendMessage(text);
+  // ブラウザモードではcontinuous=falseなので、ここでは何もしない
+  // （送信はonendで行う）
 }
 function startRecognition() { if (!recognition || micActive) return; try { recognition.start(); } catch(e) {} }
 
