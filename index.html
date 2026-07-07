@@ -574,6 +574,15 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
     </div>
     <div class="section-label" style="margin-top:14px">利用状況</div>
     <div class="card" id="cost-detail-card">読み込み中...</div>
+    <div class="section-label" style="margin-top:14px">管理者設定</div>
+    <div class="card">
+      <div class="form-group" style="margin-bottom:0">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="set-debug-log" onchange="toggleDebugLog(this.checked)" style="width:18px;height:18px">
+          <span style="font-size:13px">デバッグログを表示（音声認識・API応答の詳細）</span>
+        </label>
+      </div>
+    </div>
     <button class="btn-danger" onclick="resetAll()"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg> 全データをリセット</button>
    </div>
   </div>
@@ -1002,9 +1011,22 @@ function saveVoiceSettings() {
 function openSettingsModal() {
   document.getElementById('modal-settings').classList.add('open');
   loadSettings();
+  // デバッグログのチェックボックス状態を復元
+  var debugChk = document.getElementById('set-debug-log');
+  if (debugChk) debugChk.checked = _sttDebugEnabled;
 }
 function closeSettingsModal() {
   document.getElementById('modal-settings').classList.remove('open');
+}
+function toggleDebugLog(enabled) {
+  _sttDebugEnabled = enabled;
+  LS.set('debugLog', enabled);
+  var debugEl = document.getElementById('stt-debug');
+  if (debugEl) {
+    debugEl.style.display = enabled ? 'block' : 'none';
+    if (!enabled) debugEl.textContent = '';
+  }
+  showToast(enabled ? 'デバッグログ ON' : 'デバッグログ OFF');
 }
 
 var currentTier = 'paid';
@@ -1760,7 +1782,7 @@ var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var _silenceTimer = null;      // 無音区切りタイマー(Geminiモード用)
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
-var _sttDebugEnabled = true; // デバッグログを画面表示するか（本番ではfalseにする）
+var _sttDebugEnabled = LS.get('debugLog') === true; // デバッグログを画面表示するか（設定で切替）
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
 var SILENCE_MS = 2000;         // この時間ぶん無音が続いたらまとめて送信(既定2秒、設定で変更可)
 function sttDebug(msg) {
