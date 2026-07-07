@@ -2482,13 +2482,14 @@ function initSpeechRecognition() {
         _accumulatedText = '';
       }
 
-      // フィラーで終わる場合は、続きを待つ（1.5秒後に送信）
+      // フィラーで終わる場合は、続きを待つ（設定の無音区切り時間を使用）
       if (FILLER_PATTERNS.test(text)) {
-        sttDebug('>>> filler detected, waiting: "' + text + '"');
+        var waitMs = getSilenceMs();
+        sttDebug('>>> filler detected, waiting ' + waitMs + 'ms: "' + text + '"');
         _accumulatedText = text;
         // 既存のタイマーをクリア
         if (_fillerDelayTimer) clearTimeout(_fillerDelayTimer);
-        // 1.5秒後に送信（続きがなければ）
+        // 設定時間後に送信（続きがなければ）
         _fillerDelayTimer = setTimeout(function() {
           if (_accumulatedText && !_micHeldForSpeech && !micMuted && callStarted && !isLoading) {
             var finalText = _accumulatedText.trim();
@@ -2496,7 +2497,7 @@ function initSpeechRecognition() {
             sttDebug('>>> filler timeout, sending="' + finalText + '"');
             if (finalText) sendMessage(finalText);
           }
-        }, 1500);
+        }, waitMs);
       } else if (text) {
         // フィラータイマーをクリア
         if (_fillerDelayTimer) { clearTimeout(_fillerDelayTimer); _fillerDelayTimer = null; }
