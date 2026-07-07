@@ -1629,13 +1629,13 @@ ${elicitBlock}${memoryBlock}
 - Personalize conversation using the learner's profile naturally.
 - End every reply with ONE simple question.
 - Use emoji for visual communication when helpful.
-- If learner asks to speak slower/faster, include speedAdjust.
+- If learner asks to speak slower/faster, set speedAdjust: use -0.1 to -0.2 for "slower/ゆっくり", +0.1 to +0.2 for "faster/速く". Default is 0 (no change).
 - Keep every field SHORT. Do not pad your answer — brevity makes you respond faster, which matters a lot for a live voice conversation.
 - "hints" must be 3 short example REPLIES the learner could say right now to answer the question you just asked them — not topics, not your own words repeated. They are shown as tap-to-fill suggestion chips, so they must make sense as something the learner says back to you.
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
 IMPORTANT: The "english" field MUST come FIRST in the JSON object, before any other field. This lets the app start speaking sooner.
-"userJapanese" = a natural Japanese translation of what the LEARNER just said (their last message), so they can check how they were understood. If the learner said nothing or it's the opening, use "".
+"userJapanese" = REQUIRED: a natural Japanese translation of what the LEARNER just said (their last message), so they can check how their English was understood. This field is always required when the learner spoke. Only use "" for the opening message when the learner hasn't spoken yet.
 {"english":"2-3 short sentences","japanese":"日本語訳","userJapanese":"学習者の発言の日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}`;
 }
 
@@ -2202,11 +2202,16 @@ async function callGeminiForChat(retryCount) {
       return;
     }
     chatHistory.push({role:'model', parts:[{text: rawText}]});
+    // デバッグ: parsed内容を確認（画面にも表示）
+    sttDebug('[AI] userJp="' + (parsed.userJapanese || '') + '" spd=' + (parsed.speedAdjust || 0));
     if (parsed.speedAdjust && parsed.speedAdjust !== 0) {
       var ns = applySpeed(getSpeed() + parsed.speedAdjust);
-      showToast('速度を' + ns.toFixed(2) + 'xに調整');
+      showToast('速度を' + ns.toFixed(2) + 'xに調整しました');
+      sttDebug('[AI] speed adjusted: ' + parsed.speedAdjust + ' -> ' + ns);
     }
-    if (parsed.userJapanese) fillUserJapanese(parsed.userJapanese);
+    if (parsed.userJapanese) {
+      fillUserJapanese(parsed.userJapanese);
+    }
     // 早期表示で既にenglishは出しているので、確定後は日本語訳などを補完・更新する。
     if (spokenEarly || document.querySelector('#caption-body .cap-entry.ai:last-child')) {
       updateLastAiCaption(parsed.english, parsed.japanese);
