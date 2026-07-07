@@ -1782,7 +1782,12 @@ var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var _silenceTimer = null;      // 無音区切りタイマー(Geminiモード用)
 var _pendingFinal = '';        // まだ送信していない確定済みの発話バッファ
+var _fillerDelayTimer = null;  // フィラー検出時の遅延送信タイマー
+var _accumulatedText = '';     // フィラー待ち中に蓄積するテキスト
 var _sttDebugEnabled = LS.get('debugLog') === true; // デバッグログを画面表示するか（設定で切替）
+
+// フィラー（つなぎ言葉）のパターン - 会話継続の意思を示す
+var FILLER_PATTERNS = /\b(uh+|um+|er+|ah+|eh+|hmm+|well|so|and|but|like|you know|i mean|let me see|let's see)\s*$/i;
 var _micHeldForSpeech = false; // AI読み上げ中に一時的にマイクを止めているか
 var SILENCE_MS = 2000;         // この時間ぶん無音が続いたらまとめて送信(既定2秒、設定で変更可)
 function sttDebug(msg) {
@@ -2019,6 +2024,9 @@ function endCall() {
   callStarted = false; stopRecognition();
   stopVAD();
   stopGeminiRecording();
+  // フィラータイマーと蓄積テキストをクリア
+  if (_fillerDelayTimer) { clearTimeout(_fillerDelayTimer); _fillerDelayTimer = null; }
+  _accumulatedText = '';
   if (_mediaStream) { try { _mediaStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e) {} _mediaStream = null; _mediaRecorder = null; }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   setTalking(false);
@@ -2464,15 +2472,36 @@ function initSpeechRecognition() {
     sttDebug('=== onend ===');
 
     // continuous=falseなので、発話終了でonendが呼ばれる。
-    // _pendingFinalにテキストがあれば送信し、その後マイクを再開する。
     if (_pendingFinal && !_micHeldForSpeech && !micMuted && callStarted && !isLoading) {
       var text = _pendingFinal.trim();
       _pendingFinal = '';
-      sttDebug('>>> onend sending="' + text + '"');
-      if (text) {
-        sendMessage(text).then(function() {
-          // 送信完了後、マイクを再開（AIの応答待ち中は再開しない→releaseMicAfterSpeechで再開）
-        });
+
+      // 蓄積テキストがあれば結合
+      if (_accumulatedText) {
+        text = (_accumulatedText + ' ' + text).trim();
+        _accumulatedText = '';
+      }
+
+      // フィラーで終わる場合は、続きを待つ（1.5秒後に送信）
+      if (FILLER_PATTERNS.test(text)) {
+        sttDebug('>>> filler detected, waiting: "' + text + '"');
+        _accumulatedText = text;
+        // 既存のタイマーをクリア
+        if (_fillerDelayTimer) clearTimeout(_fillerDelayTimer);
+        // 1.5秒後に送信（続きがなければ）
+        _fillerDelayTimer = setTimeout(function() {
+          if (_accumulatedText && !_micHeldForSpeech && !micMuted && callStarted && !isLoading) {
+            var finalText = _accumulatedText.trim();
+            _accumulatedText = '';
+            sttDebug('>>> filler timeout, sending="' + finalText + '"');
+            if (finalText) sendMessage(finalText);
+          }
+        }, 1500);
+      } else if (text) {
+        // フィラータイマーをクリア
+        if (_fillerDelayTimer) { clearTimeout(_fillerDelayTimer); _fillerDelayTimer = null; }
+        sttDebug('>>> onend sending="' + text + '"');
+        sendMessage(text).then(function() {});
       }
     }
 
