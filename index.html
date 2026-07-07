@@ -210,6 +210,9 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .cap-entry.me .cap-en{background:rgba(15,158,125,.25);color:var(--teal2);border-radius:11px 4px 11px 11px}
 .cap-jp{font-size:11px;color:var(--text3);padding:3px 11px;line-height:1.5;display:none}
 .cap-jp.show{display:block}
+.cap-original{font-size:10px;color:var(--text3);margin-top:4px;opacity:0.7}
+.cap-corrected{color:var(--teal2)}
+.cap-tip{font-size:11px;color:var(--amber);background:rgba(245,158,11,.1);border-radius:6px;padding:6px 10px;margin-top:6px;line-height:1.5}
 .call-controls{display:flex;align-items:center;justify-content:space-around;padding:10px 8px 7px;background:var(--navy2);border-top:1px solid var(--border);flex-shrink:0}
 .ctrl-item{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px}
 .ctrl-btn{width:46px;height:46px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;background:var(--surface2)}
@@ -1669,8 +1672,10 @@ ALWAYS interpret the learner's speech by CONTEXT, not just literal transcription
 
 ## JSON Response (STRICT - return ONLY this JSON, no other text)
 IMPORTANT: The "english" field MUST come FIRST in the JSON object, before any other field. This lets the app start speaking sooner.
-"userJapanese" = REQUIRED: a natural Japanese translation of what the LEARNER just said (their last message), so they can check how their English was understood. This field is always required when the learner spoke. Only use "" for the opening message when the learner hasn't spoken yet.
-{"english":"2-3 short sentences","japanese":"日本語訳","userJapanese":"学習者の発言の日本語訳","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}`;
+- "userJapanese" = REQUIRED: a natural Japanese translation of what the LEARNER just said (their last message), so they can check how their English was understood. This field is always required when the learner spoke. Only use "" for the opening message when the learner hasn't spoken yet.
+- "userEnglishCorrected" = If the learner's English had errors or unnatural phrasing, provide a corrected/more natural version here. If the original was fine, just copy it. This shows the learner the better way to say it.
+- "pronunciationTip" = If you detected a likely pronunciation issue (L/R, vowel, TH, etc.), give a SHORT friendly tip in Japanese like "💡 playは「プレイ」、prayは「プレイ」ではなく「プレー」のように発音します" or "💡 workとwalkの違い：workは口をあまり開けず「ワーク」". Leave "" if no tip needed. Max 1 tip per response.
+{"english":"2-3 short sentences","japanese":"日本語訳","userJapanese":"学習者の発言の日本語訳","userEnglishCorrected":"corrected learner's English","pronunciationTip":"発音ヒント（不要なら空）","speedAdjust":0,"hints":["learner's possible reply 1","learner's possible reply 2","learner's possible reply 3"],"extract":{"name":"","hobby":"","job":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}`;
 }
 
 
@@ -2066,22 +2071,45 @@ async function sendMessage(overrideText) {
   // 直近のユーザー吹き出しに印を付け、AI応答に含まれる日本語訳を後から反映できるようにする
   var meEntries = document.querySelectorAll('#caption-body .cap-entry.me');
   var lastMe = meEntries[meEntries.length - 1];
-  if (lastMe) lastMe.setAttribute('data-await-jp', '1');
+  if (lastMe) {
+    lastMe.setAttribute('data-await-jp', '1');
+    lastMe.setAttribute('data-original-text', text); // 元のテキストを保存
+  }
   resetReplyTimer();
   chatHistory.push({role:'user', parts:[{text:text}]});
   await callGeminiForChat(0);
 }
-// AI応答から得たユーザー発話の日本語訳を、直近のユーザー吹き出しに差し込む
-function fillUserJapanese(jp) {
-  if (!jp) return;
+// AI応答から得たユーザー発話の日本語訳・補正後英文・発音ヒントを、直近のユーザー吹き出しに差し込む
+function fillUserFeedback(jp, correctedEn, pronunciationTip) {
   var target = document.querySelector('#caption-body .cap-entry.me[data-await-jp="1"]');
   if (!target) return;
   target.removeAttribute('data-await-jp');
-  if (target.querySelector('.cap-jp')) return;
-  var div = document.createElement('div');
-  div.className = 'cap-jp' + (capJpEnabled ? ' show' : '');
-  div.textContent = jp;
-  target.appendChild(div);
+  var originalText = target.getAttribute('data-original-text') || '';
+
+  // 補正後の英文が元のテキストと異なる場合、表示を差し替え＋元の表示を追加
+  if (correctedEn && originalText && correctedEn.toLowerCase().trim() !== originalText.toLowerCase().trim()) {
+    var enEl = target.querySelector('.cap-en');
+    if (enEl) {
+      enEl.innerHTML = '<span class="cap-corrected">' + escHtml(correctedEn) + '</span>' +
+        '<div class="cap-original">🔊 認識: ' + escHtml(originalText) + '</div>';
+    }
+  }
+
+  // 日本語訳
+  if (jp && !target.querySelector('.cap-jp')) {
+    var div = document.createElement('div');
+    div.className = 'cap-jp' + (capJpEnabled ? ' show' : '');
+    div.textContent = jp;
+    target.appendChild(div);
+  }
+
+  // 発音ヒント
+  if (pronunciationTip && !target.querySelector('.cap-tip')) {
+    var tipDiv = document.createElement('div');
+    tipDiv.className = 'cap-tip';
+    tipDiv.textContent = pronunciationTip;
+    target.appendChild(tipDiv);
+  }
 }
 
 // Gemini APIの429エラーに含まれる推奨待機時間(RetryInfo.retryDelay、例:"31s")を取り出す
@@ -2253,8 +2281,9 @@ async function callGeminiForChat(retryCount) {
       showToast('速度を' + ns.toFixed(2) + 'xに調整しました');
       sttDebug('[AI] speed adjusted: ' + parsed.speedAdjust + ' -> ' + ns);
     }
-    if (parsed.userJapanese) {
-      fillUserJapanese(parsed.userJapanese);
+    // ユーザー発話のフィードバック（日本語訳、補正後英文、発音ヒント）
+    if (parsed.userJapanese || parsed.userEnglishCorrected || parsed.pronunciationTip) {
+      fillUserFeedback(parsed.userJapanese, parsed.userEnglishCorrected, parsed.pronunciationTip);
     }
     // 早期表示で既にenglishは出しているので、確定後は日本語訳などを補完・更新する。
     if (spokenEarly || document.querySelector('#caption-body .cap-entry.ai:last-child')) {
