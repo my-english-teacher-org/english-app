@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<!-- CSP: 単一HTMLのためinlineは許可するが、通信先(connect-src)をGemini APIのみに限定する。
+     万一XSSが混入してもlocalStorage内のAPIキーを外部サーバーへ送信できないようにする多層防御。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://generativelanguage.googleapis.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>English AI Teacher</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
@@ -212,6 +215,9 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 .cap-jp.show{display:block}
 .cap-original{font-size:10px;color:var(--text3);margin-top:4px;opacity:0.7}
 .cap-corrected{color:var(--teal2)}
+.cap-diff{color:var(--teal2);font-weight:600;background:rgba(18,184,144,.14);border-radius:4px;padding:0 3px}
+.cap-has-correction{animation:capFlash 1.2s ease-out 1}
+@keyframes capFlash{0%{background:rgba(18,184,144,.25);border-radius:8px}100%{background:transparent}}
 .cap-tip{font-size:11px;color:var(--amber);background:rgba(245,158,11,.1);border-radius:6px;padding:6px 10px;margin-top:6px;line-height:1.5}
 .call-controls{display:flex;align-items:center;justify-content:space-around;padding:10px 8px 7px;background:var(--navy2);border-top:1px solid var(--border);flex-shrink:0}
 .ctrl-item{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px}
@@ -562,6 +568,13 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
         <input class="form-input" id="set-monthly" type="number" value="5" min="1" max="250">
       </div>
       <div class="form-group">
+        <label class="form-label">先生の訂正スタイル</label>
+        <div class="form-radio-group">
+          <div class="form-radio selected" id="set-corr-gentle" onclick="selectCorrectionStyle('gentle')"><div class="form-radio-label">🌱 やさしく</div><div class="form-radio-sub">直接指摘せず、返答の中で自然に正しい表現を見せる</div></div>
+          <div class="form-radio" id="set-corr-explicit" onclick="selectCorrectionStyle('explicit')"><div class="form-radio-label">✏️ はっきり伝える</div><div class="form-radio-sub">誤りを1文で短く優しく指摘してから会話を続ける</div></div>
+        </div>
+      </div>
+      <div class="form-group">
         <label class="form-label">AI音声速度</label>
         <div class="speed-wrap">
           <span>🐢</span>
@@ -807,7 +820,7 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
 <script>
 const LS = {
   get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
-  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) { console.warn('localStorage write failed:', k, e); } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch(e) { console.warn('localStorage write failed:', k, e); return false; } },
 };
 const K = {
   API_KEY:'lm_api_key', MODEL:'lm_model', TIER:'lm_tier', MONTHLY_LIMIT:'lm_monthly_limit',
@@ -822,6 +835,7 @@ const K = {
   RECOG_LANG:'lm_recog_lang',
   RECOG_ENGINE:'lm_recog_engine',
   SILENCE_MS:'lm_silence_ms',
+  CORRECTION_STYLE:'lm_correction_style',
   VOICE_VOLUME:'lm_voice_volume',
 };
 
@@ -832,12 +846,15 @@ function levelLabel(v) {
   return {junior:'中学生レベル',senior:'高校生レベル',college:'大学生レベル',adult:'社会人レベル',business:'ビジネス英語'}[v]||v;
 }
 
+var _toastTimer = null;
 function showToast(msg, dur) {
   dur = dur || 3000;
   const t = document.getElementById('toast');
   document.getElementById('toast-msg').textContent = msg;
   t.classList.add('show');
-  setTimeout(function() { t.classList.remove('show'); }, dur);
+  // 連続で呼ばれた場合、前回のタイマーが新しいトーストを早く消してしまわないようにする
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function() { t.classList.remove('show'); _toastTimer = null; }, dur);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1034,6 +1051,12 @@ function toggleDebugLog(enabled) {
 }
 
 var currentTier = 'paid';
+var currentCorrectionStyle = 'gentle';
+function selectCorrectionStyle(style) {
+  currentCorrectionStyle = style;
+  document.getElementById('set-corr-gentle').classList.toggle('selected', style === 'gentle');
+  document.getElementById('set-corr-explicit').classList.toggle('selected', style === 'explicit');
+}
 function selectTier(tier) {
   currentTier = tier;
   document.getElementById('set-tier-free').classList.toggle('selected', tier === 'free');
@@ -1066,6 +1089,7 @@ function loadSettings() {
   var modelEl = document.getElementById('set-model');
   if (modelEl) modelEl.value = model;
   selectTier(tier);
+  selectCorrectionStyle(LS.get(K.CORRECTION_STYLE) || 'gentle');
   var limitEl = document.getElementById('set-monthly');
   if (limitEl) limitEl.value = limit;
   var sl = document.getElementById('speed-slider');
@@ -1130,12 +1154,14 @@ function saveSettings() {
   var err = document.getElementById('set-key-err');
   if (!key || key.length < 20) { err.classList.add('visible'); return; }
   err.classList.remove('visible');
-  LS.set(K.API_KEY, key);
-  LS.set(K.MODEL, document.getElementById('set-model').value);
-  LS.set(K.TIER, currentTier);
-  LS.set(K.MONTHLY_LIMIT, parseFloat(document.getElementById('set-monthly').value) || 5);
+  var ok = LS.set(K.API_KEY, key);
+  ok = LS.set(K.MODEL, document.getElementById('set-model').value) && ok;
+  ok = LS.set(K.TIER, currentTier) && ok;
+  ok = LS.set(K.MONTHLY_LIMIT, parseFloat(document.getElementById('set-monthly').value) || 5) && ok;
+  ok = LS.set(K.CORRECTION_STYLE, currentCorrectionStyle) && ok;
   updateCostDisplay();
-  showToast('設定を保存しました ✓');
+  if (ok) showToast('設定を保存しました ✓');
+  else showToast('⚠ 設定を保存できませんでした（プライベートブラウズや容量制限の可能性があります）', 6000);
 }
 function renderCostCard() {
   rolloverBillingMonthIfNeeded();
@@ -1187,7 +1213,13 @@ function updateCostDisplay() {
   var el = document.getElementById('cost-today-disp');
   if (!el) return;
   if (isFree) { el.textContent = '無料版AI'; el.style.color = 'var(--teal2)'; }
-  else { el.textContent = '$' + (LS.get(K.COST_TODAY) || 0).toFixed(4); el.style.color = ''; }
+  else {
+    // 1か月でいくら使ったかを常に見られるよう、今月の概算料金を表示する
+    // (lm_cost_monthly は rolloverBillingMonthIfNeeded() により毎月1日に自動リセット)
+    rolloverBillingMonthIfNeeded();
+    el.textContent = '今月 $' + (LS.get(K.COST_MONTHLY) || 0).toFixed(4);
+    el.style.color = '';
+  }
 }
 
 // ════════ CHIP HELPERS ════════
@@ -1397,7 +1429,7 @@ function renderProfSection(secId, items, canEdit) {
   }
   body.innerHTML = items.map(item => `
     <div class="prof-row" id="profrow-${item.key}">
-      <div class="prof-row-label">${item.label}</div>
+      <div class="prof-row-label">${escHtml(item.label)}</div>
       <div class="prof-row-val" id="profval-${item.key}">${escHtml(item.val)}</div>
       ${canEdit ? `<div class="prof-row-actions">
         <button data-key="${escHtml(item.key)}" onclick="editProfItem(this.dataset.key)" title="編集"><svg class="ti-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" /><path d="M13.5 6.5l4 4" /></svg></button>
@@ -1628,6 +1660,12 @@ If this is your very first reply this session, naturally open by acknowledging t
 This is the learner's very first conversation with you. Make them feel welcome and a little excited to start, but don't overwhelm them with questions in the first reply.`;
   }
 
+  // 訂正スタイル: gentle(既定)=Language Parent方式 / explicit=短く優しく指摘してから続ける
+  const correctionStyle = LS.get(K.CORRECTION_STYLE) || 'gentle';
+  const rule2 = correctionStyle === 'explicit'
+    ? `2. When the learner makes an error, FIRST point it out briefly and kindly in ONE short sentence (e.g. "Quick tip: we usually say 'go shopping', not 'go to shopping' 😊"), THEN continue the conversation naturally. Never lecture, never list multiple corrections at once — one gentle correction at most per reply.`
+    : `2. NEVER directly correct errors. Naturally model the correct form in your reply.`;
+
   return `You are ${name}, a ${personality} acting as a Language Parent for a Japanese learner${hasName ? ' named ' + uname : ''}.
 
 ## Learner Profile
@@ -1638,7 +1676,7 @@ ${elicitBlock}${memoryBlock}
 
 ## Language Parent Rules (strictly follow all)
 1. English only. The "english" field must contain ONLY English words — never any Japanese characters (hiragana, katakana, kanji) or placeholders. Japanese belongs only in the "japanese"/"userJapanese" fields.
-2. NEVER directly correct errors. Naturally model the correct form in your reply.
+${rule2}
 3. Echo back what you understood ("So you mean...?") to confirm understanding.
 4. **Match the learner's level — this is the single most important rule.** Judge their level from what they ACTUALLY write/say each turn (sentence length, vocabulary, grammar, fluency, how much they hesitate), and speak so they can comfortably understand you. Concretely:
    - **beginner**: Use only very common words (top ~1000). MAX 8 words per sentence. One idea per sentence. Present simple tense mostly. No idioms, no phrasal verbs, no complex clauses. Example feel: "That's nice! Do you like music? What music do you like?"
@@ -1795,6 +1833,7 @@ function speakText(text) {
 // ── マイク ──
 
 var selectedChar = null, chatHistory = [], voiceEnabled = true, visualEnabled = false;
+var sessionCorrections = []; // 今回の通話で発生した訂正(通話終了時のまとめ表示用)
 var currentSessionCtx = null;
 var micMuted = true, capEnEnabled = true, capJpEnabled = false, capCycleMode = 0;
 var _silenceTimer = null;      // 無音区切りタイマー(Geminiモード用)
@@ -1925,7 +1964,7 @@ function startCall() {
   callStarted = true;
   loadAvatarPhoto(selectedChar);
   document.getElementById('ai-name-tag').textContent = selectedChar.name + ' — ' + selectedChar.title;
-  chatHistory = []; document.getElementById('caption-body').innerHTML = '';
+  chatHistory = []; sessionCorrections = []; document.getElementById('caption-body').innerHTML = '';
   setHintChips(['Hello! Nice to meet you!', 'My name is...', 'I like...', "I'm from Japan"]);
 
   // 前回までの通話ログから、セッション継続用のコンテキストを作る
@@ -2031,6 +2070,48 @@ function buildSessionExcerpt() {
   return lines.join('\n');
 }
 
+// 通話中に発生した訂正(最大8件)を一覧表示する簡易モーダル。
+// Language Parent方式の「さりげない訂正」は気づかれにくいため、通話後の振り返り機会で補う。
+function showCorrectionsSummary() {
+  if (!sessionCorrections.length) return;
+  var ov = document.createElement('div');
+  ov.className = 'modal-overlay open';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  var modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.style.maxWidth = '460px';
+  var title = document.createElement('div');
+  title.className = 'modal-title';
+  title.textContent = '✨ 今日、直った表現';
+  modal.appendChild(title);
+  var sub = document.createElement('p');
+  sub.style.cssText = 'font-size:12px;color:var(--text3);margin:0 0 12px';
+  sub.textContent = '今回の通話で先生がさりげなく直した表現です。声に出して読み返してみましょう。';
+  modal.appendChild(sub);
+  sessionCorrections.slice(0, 8).forEach(function(c) {
+    var row = document.createElement('div');
+    row.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;margin-bottom:8px';
+    // あなたの発言(小さく) → 補正後(差分ハイライト付き)
+    row.innerHTML =
+      '<div style="font-size:11px;color:var(--text3);text-decoration:line-through;opacity:.8">' + escHtml(c.original) + '</div>' +
+      '<div style="font-size:13px;margin-top:4px;line-height:1.5">→ ' + diffHighlight(c.original, c.corrected) + '</div>';
+    modal.appendChild(row);
+  });
+  if (sessionCorrections.length > 8) {
+    var more = document.createElement('div');
+    more.style.cssText = 'font-size:11px;color:var(--text3);text-align:center;margin-bottom:8px';
+    more.textContent = '…ほか ' + (sessionCorrections.length - 8) + ' 件';
+    modal.appendChild(more);
+  }
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'cta-btn';
+  closeBtn.textContent = '閉じる';
+  closeBtn.addEventListener('click', function() { ov.remove(); });
+  modal.appendChild(closeBtn);
+  ov.appendChild(modal);
+  document.body.appendChild(ov);
+}
+
 function endCall() {
   if (!confirm('通話を終了しますか？')) return;
   var excerpt = buildSessionExcerpt();
@@ -2057,7 +2138,18 @@ function endCall() {
   document.getElementById('visual-assist').classList.remove('show');
   renderCharCards(); document.getElementById('char-start-btn').disabled = true;
   LS.set(K.SESSION_COUNT, (LS.get(K.SESSION_COUNT) || 0) + 1);
+  // 今回の通話で訂正が1件以上あれば「直った表現」まとめを表示
+  showCorrectionsSummary();
 }
+
+// AI応答を履歴に保存する際、hints/extract等の学習UI用フィールドを落として
+// english/japaneseのみに圧縮する。毎ターン全履歴をAPIに送るため、
+// 生JSONのまま蓄積するとトークン消費(コスト・遅延)が会話が長引くほど膨らむ。
+function pushModelHistory(en, jp) {
+  chatHistory.push({role:'model', parts:[{text: JSON.stringify({english: en || '', japanese: jp || ''})}]});
+}
+// APIへ送る履歴の上限(メッセージ数)。長時間の通話でも毎ターンのコストが際限なく増えないようにする。
+var MAX_HISTORY_MSGS = 24;
 
 async function sendMessage(overrideText) {
   var inp  = document.getElementById('chat-input');
@@ -2079,6 +2171,33 @@ async function sendMessage(overrideText) {
   chatHistory.push({role:'user', parts:[{text:text}]});
   await callGeminiForChat(0);
 }
+// 元の発言と補正後英文の単語レベル差分(LCS)を取り、変更・追加された単語だけを
+// <span class="cap-diff">で色付き強調したHTMLを返す。「さりげない訂正」の気づきを高める。
+// 出力は全単語をescHtml()でエスケープ済み(XSS安全)。
+function diffHighlight(original, corrected) {
+  var norm = function(w){ return w.toLowerCase().replace(/^['"]+|['".,!?;:]+$/g, ''); };
+  var a = String(original || '').split(/\s+/).filter(Boolean);
+  var b = String(corrected || '').split(/\s+/).filter(Boolean);
+  var n = a.length, m = b.length;
+  if (!m) return '';
+  // LCSテーブル(発話は短文なのでO(n*m)で十分)
+  var dp = [];
+  for (var i = 0; i <= n; i++) dp.push(new Array(m + 1).fill(0));
+  for (var i = n - 1; i >= 0; i--) {
+    for (var j = m - 1; j >= 0; j--) {
+      dp[i][j] = norm(a[i]) === norm(b[j]) ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  var out = [], x = 0, y = 0;
+  while (x < n && y < m) {
+    if (norm(a[x]) === norm(b[y])) { out.push(escHtml(b[y])); x++; y++; }
+    else if (dp[x+1][y] >= dp[x][y+1]) { x++; } // 削除された単語(補正文には出さない)
+    else { out.push('<span class="cap-diff">' + escHtml(b[y]) + '</span>'); y++; }
+  }
+  while (y < m) { out.push('<span class="cap-diff">' + escHtml(b[y]) + '</span>'); y++; }
+  return out.join(' ');
+}
+
 // AI応答から得たユーザー発話の日本語訳・補正後英文・発音ヒントを、直近のユーザー吹き出しに差し込む
 function fillUserFeedback(jp, correctedEn, pronunciationTip) {
   var target = document.querySelector('#caption-body .cap-entry.me[data-await-jp="1"]');
@@ -2090,9 +2209,13 @@ function fillUserFeedback(jp, correctedEn, pronunciationTip) {
   if (correctedEn && originalText && correctedEn.toLowerCase().trim() !== originalText.toLowerCase().trim()) {
     var enEl = target.querySelector('.cap-en');
     if (enEl) {
-      enEl.innerHTML = '<span class="cap-corrected">' + escHtml(correctedEn) + '</span>' +
+      // 変更された単語だけを色付き強調し、表示直後に一瞬光らせて視線を誘導する
+      enEl.innerHTML = '<span class="cap-corrected">' + diffHighlight(originalText, correctedEn) + '</span>' +
         '<div class="cap-original">🔊 認識: ' + escHtml(originalText) + '</div>';
+      target.classList.add('cap-has-correction');
     }
+    // 通話終了時の「今日、直った表現」まとめ用に蓄積
+    sessionCorrections.push({ original: originalText, corrected: correctedEn });
   }
 
   // 日本語訳
@@ -2213,8 +2336,8 @@ async function callGeminiForChat(retryCount) {
   try {
     var body = {
       system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level, currentSessionCtx)}]},
-      contents: chatHistory,
-      generationConfig: {temperature:0.8, maxOutputTokens:350}
+      contents: chatHistory.slice(-MAX_HISTORY_MSGS),
+      generationConfig: {temperature:0.8, maxOutputTokens:512}
     };
     var spokenEarly = false;
     var result = await streamGemini(model, apiKey, body, function(earlyEnglish) {
@@ -2225,9 +2348,13 @@ async function callGeminiForChat(retryCount) {
     });
     if (!result.ok) {
       var errData = result.errData || {};
-      if (result.status === 429 && (LS.get(K.TIER) || 'paid') === 'free' && retryCount < 6) {
-        var waitSec = parseRetryDelaySeconds(errData) || Math.min(10 * (retryCount + 1), 40);
-        showToast('レート制限のため ' + waitSec + '秒待って自動リトライします (' + (retryCount + 1) + '/6)', waitSec * 1000);
+      // 429(レート制限)は無料Tierだけでなく有料TierでもRPM制限等で発生し得るため、
+      // 無料: 最大6回 / 有料: 最大2回 の自動リトライを行う。
+      var isFreeTier = (LS.get(K.TIER) || 'paid') === 'free';
+      var maxRetries429 = isFreeTier ? 6 : 2;
+      if (result.status === 429 && retryCount < maxRetries429) {
+        var waitSec = parseRetryDelaySeconds(errData) || (isFreeTier ? Math.min(10 * (retryCount + 1), 40) : 5);
+        showToast('レート制限のため ' + waitSec + '秒待って自動リトライします (' + (retryCount + 1) + '/' + maxRetries429 + ')', waitSec * 1000);
         isLoading = false; document.getElementById('send-btn').disabled = false;
         setTimeout(function() { callGeminiForChat(retryCount + 1); }, waitSec * 1000);
         return;
@@ -2263,8 +2390,9 @@ async function callGeminiForChat(retryCount) {
       // 何も取り出せない場合は、生JSONを表示せず素直にエラー扱いにする。
       if (spokenEarly) {
         // 早期表示済みなら、その表示を活かして日本語だけ諦める
-        updateLastAiCaption(extractEarlyEnglish(rawText.replace(/```json|```/g, '')) || '...', '');
-        chatHistory.push({role:'model', parts:[{text: rawText}]});
+        var salvaged = extractEarlyEnglish(rawText.replace(/```json|```/g, '')) || '...';
+        updateLastAiCaption(salvaged, '');
+        pushModelHistory(salvaged, '');
       } else {
         addCaption('ai', '⚠️ Sorry, could you say that again?', 'うまく応答を受け取れませんでした。もう一度話しかけてください。', null);
       }
@@ -2273,7 +2401,7 @@ async function callGeminiForChat(retryCount) {
       if (micMuted) document.getElementById('chat-input').focus();
       return;
     }
-    chatHistory.push({role:'model', parts:[{text: rawText}]});
+    pushModelHistory(parsed.english, parsed.japanese);
     // デバッグ: parsed内容を確認（画面にも表示）
     sttDebug('[AI] userJp="' + (parsed.userJapanese || '') + '" spd=' + (parsed.speedAdjust || 0));
     if (parsed.speedAdjust && parsed.speedAdjust !== 0) {
@@ -2341,7 +2469,7 @@ async function teacherProactiveMessage() {
   var model  = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
   var profile = LS.get(K.PROFILE) || {};
   var level   = LS.get(K.LEVEL)   || 'college';
-  var hist = chatHistory.concat([{role:'user', parts:[{text:'[System: waitingForReply: true. Gently follow up or change topic.]'}]}]);
+  var hist = chatHistory.slice(-MAX_HISTORY_MSGS).concat([{role:'user', parts:[{text:'[System: waitingForReply: true. Gently follow up or change topic.]'}]}]);
   try {
     var body = {
       system_instruction: {parts:[{text: selectedChar.systemPrompt(profile, level, currentSessionCtx)}]},
@@ -2358,7 +2486,6 @@ async function teacherProactiveMessage() {
     var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '';
     var um = data.usageMetadata || {};
     updateTokenCost(um.promptTokenCount || 0, um.candidatesTokenCount || 0, model);
-    chatHistory.push({role:'model', parts:[{text: rawText}]});
     var parsed;
     try {
       parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
@@ -2368,6 +2495,7 @@ async function teacherProactiveMessage() {
       parsed = pEn ? {english: pEn, japanese: pJp || '', speedAdjust:0, hints:[]} : null;
     }
     if (!parsed || !parsed.english) { isLoading = false; document.getElementById('send-btn').disabled = false; startReplyTimer(); return; }
+    pushModelHistory(parsed.english, parsed.japanese);
     if (parsed.speedAdjust && parsed.speedAdjust !== 0) applySpeed(getSpeed() + parsed.speedAdjust);
     addCaption('ai', parsed.english, parsed.japanese, null);
     if (parsed.hints && parsed.hints.length) setHintChips(parsed.hints);
@@ -2698,7 +2826,6 @@ function finalizeGeminiSegment() {
 // 原因になっていた可能性が高い。デコード→16bit PCM WAVへ再エンコードして送る。
 async function convertBlobToWav(blob) {
   var arrayBuf = await blob.arrayBuffer();
-  var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   var DecodeCtx = new (window.AudioContext || window.webkitAudioContext)();
   var audioBuffer;
   try {
@@ -2860,7 +2987,18 @@ function confirmAndSendRecognized(text) {
     if (_confirmTimer) { clearTimeout(_confirmTimer); _confirmTimer = null; }
     live.innerHTML = ''; live.textContent = '';
     _transcribing = false;
-    if (finalText && finalText.trim() && callStarted && !isLoading) sendMessage(finalText.trim());
+    var ft = (finalText || '').trim();
+    if (!ft || !callStarted) return;
+    if (!isLoading) { sendMessage(ft); return; }
+    // AI応答の生成中だった場合、以前は発話が無言で破棄されていた。
+    // 応答が終わるまで最大10秒待ってから送信する(通話が終わったら中止)。
+    var tries = 0;
+    var waitTimer = setInterval(function() {
+      tries++;
+      if (!callStarted) { clearInterval(waitTimer); return; }
+      if (!isLoading) { clearInterval(waitTimer); sendMessage(ft); return; }
+      if (tries > 40) { clearInterval(waitTimer); showToast('AIの応答中だったため送信できませんでした。もう一度話してください', 5000); }
+    }, 250);
   }
   sendBtn.addEventListener('click', function() { finish(txt.textContent); });
   editBtn.addEventListener('click', function() {
@@ -3087,7 +3225,11 @@ function setHintChips(hints) {
   });
 }
 function useHint(text) { var inp = document.getElementById('chat-input'); inp.value = text; inp.focus(); autoResize(inp); }
-function chatKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function chatKey(e) {
+  // IME(日本語入力)の変換確定Enterでは送信しない(isComposing / keyCode 229 はIME処理中を示す)
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
 function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 80) + 'px'; }
 </script>
 </body>
