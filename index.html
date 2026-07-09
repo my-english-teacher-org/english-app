@@ -1902,6 +1902,21 @@ function initCallScreen() {
   var saved = LS.get(K.MIC_PERMITTED);
   if (saved === true)  micPermitted = true;
   if (saved === false) micPermitted = false;
+  // ブラウザ側で許可状態が変更されていたらキャッシュを実状態に同期する
+  // (Permissions API非対応ブラウザでは何もしない。その場合もtoggleMic側で再確認される)
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'microphone' }).then(function(st) {
+        var apply = function(state) {
+          if (state === 'granted') { micPermitted = true;  LS.set(K.MIC_PERMITTED, true); }
+          else if (state === 'denied') { micPermitted = false; LS.set(K.MIC_PERMITTED, false); }
+          else { micPermitted = null; LS.set(K.MIC_PERMITTED, null); }
+        };
+        apply(st.state);
+        st.onchange = function() { apply(st.state); };
+      }).catch(function() {});
+    }
+  } catch (e) {}
   renderCharCards(); updateCostDisplay(); applySpeed(getSpeed());
   initSpeechRecognition(); updateCapToggleUI(); updateCaptionCycleUI(); updateMicUI();
 }
@@ -3069,8 +3084,27 @@ function stopRecognition() {
   document.getElementById('mic-indicator').classList.remove('show');
   try { recognition.abort(); } catch(e) {}
 }
+// getUserMediaで実際のマイク許可状態を確認し直し、キャッシュ(micPermitted)を更新する。
+// 許可されていれば即座にストリームを閉じてtrueを返す。
+async function probeMicPermission() {
+  try {
+    var s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach(function(t) { t.stop(); });
+    micPermitted = true; LS.set(K.MIC_PERMITTED, true);
+    return true;
+  } catch (e) {
+    micPermitted = false; LS.set(K.MIC_PERMITTED, false);
+    return false;
+  }
+}
+
 async function toggleMic() {
-  if (micPermitted === false) { showToast('アドレスバー左の🔒からマイクを許可してください', 6000); return; }
+  if (micPermitted === false) {
+    // 以前は一度falseがキャッシュされると永久にここで弾かれ、ユーザーがアドレスバーから
+    // マイクを許可し直しても反映されなかった。実際の許可状態を毎回確認し直す。
+    var ok = await probeMicPermission();
+    if (!ok) { showToast('マイクがブロックされています。アドレスバー左の🔒(またはサイト設定)からマイクを「許可」にしてください', 7000); return; }
+  }
   var useGemini = (LS.get(K.RECOG_ENGINE) || 'browser') === 'gemini';
   if (!useGemini && !recognition) { showToast('このブラウザは音声認識に対応していません', 4000); return; }
   if (micMuted) {
