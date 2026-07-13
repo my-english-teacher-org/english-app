@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Live API 検証 — Phase 0 / Phase 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0B1F3A; --navy2:#132844;
+  --surface1:#162C4A; --surface2:#1C3558; --surface3:#243F68;
+  --border:rgba(255,255,255,.09); --border2:rgba(255,255,255,.16);
+  --teal:#0F9E7D; --teal2:#12B890; --teal-soft:rgba(18,184,144,.14); --teal-line:rgba(18,184,144,.38);
+  --amber:#F59E0B; --amber-soft:rgba(245,158,11,.14);
+  --coral:#EF4444; --coral-soft:rgba(239,68,68,.14);
+  --blue:#5B9FE3; --blue-soft:rgba(91,159,227,.14);
+  --text1:#E8F0FB; --text2:#94B4D4; --text3:#5B7FA8;
+  --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --disp:'Space Grotesk',sans-serif;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:
+    radial-gradient(1100px 600px at 88% -8%, rgba(18,184,144,.09), transparent 60%),
+    radial-gradient(900px 500px at -8% 8%, rgba(91,159,227,.07), transparent 55%),
+    var(--navy);
+  color:var(--text1); font-family:'Inter',sans-serif; line-height:1.6; font-size:14px;
+  min-height:100vh;
+}
+.wrap{max-width:1240px; margin:0 auto; padding:24px 22px 80px;}
+
+header{display:flex; align-items:center; gap:12px; padding-bottom:16px; border-bottom:1px solid var(--border); margin-bottom:22px; flex-wrap:wrap;}
+header .dot{width:10px;height:10px;border-radius:50%;background:var(--text3);flex:none;transition:.2s;}
+header .dot.on{background:var(--teal2); box-shadow:0 0 12px var(--teal2);}
+header h1{font-family:var(--disp); font-size:17px; margin:0; font-weight:700;}
+header .sub{font-size:11px;color:var(--text3);font-family:var(--mono);}
+header .spacer{flex:1;}
+.hchip{font-family:var(--mono);font-size:12px;background:var(--surface1);border:1px solid var(--border);padding:6px 11px;border-radius:8px;color:var(--text2);}
+.hchip b{color:var(--text1);}
+.hchip.cost b{color:#7BE0C2;}
+
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+@media(max-width:940px){.grid{grid-template-columns:1fr;}}
+
+.card{background:var(--surface1); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-bottom:16px;}
+.card h3{font-family:var(--disp);font-size:13px;margin:0 0 12px;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--text3);display:flex;align-items:center;gap:8px;}
+.card h3 .n{font-family:var(--mono);color:var(--teal2);}
+
+label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);font-weight:700;margin:10px 0 4px;}
+input[type=text],input[type=password],select,textarea{
+  width:100%; background:var(--surface2); border:1px solid var(--border2); color:var(--text1);
+  border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:12.5px; outline:none;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--teal-line);}
+textarea{font-family:'Inter',sans-serif;font-size:13px;resize:vertical;line-height:1.5;}
+.row{display:flex;gap:10px;}
+.row>*{flex:1;}
+
+button{
+  font-family:'Inter',sans-serif; font-weight:700; font-size:13px; border:none; cursor:pointer;
+  padding:11px 14px; border-radius:9px; background:var(--teal2); color:#08251C; transition:.15s;
+}
+button:hover:not(:disabled){filter:brightness(1.1);}
+button:disabled{opacity:.35; cursor:not-allowed;}
+button.ghost{background:transparent;border:1px solid var(--border2);color:var(--text2);font-weight:600;}
+button.danger{background:var(--coral);color:#fff;}
+
+/* metrics */
+.mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.metric{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
+.metric .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);font-weight:700;}
+.metric .v{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text1);margin-top:2px;}
+.metric .u{font-size:10px;color:var(--text3);}
+.metric.hi{border-color:var(--teal-line);background:linear-gradient(180deg,var(--teal-soft),var(--surface2));}
+.metric.hi .v{color:#7BE0C2;}
+.metric.warn{border-color:rgba(245,158,11,.45);background:linear-gradient(180deg,var(--amber-soft),var(--surface2));}
+.metric.warn .v{color:#F3C089;}
+
+/* barge-in banner */
+.barge{margin-top:12px;padding:12px 14px;border-radius:10px;border:1px solid var(--border2);
+  background:var(--surface2);text-align:center;transition:.15s;}
+.barge .big{font-family:var(--mono);font-size:26px;font-weight:700;}
+.barge .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);font-weight:700;}
+.barge.flash{background:var(--coral);border-color:var(--coral);}
+.barge.flash .big,.barge.flash .lbl{color:#fff;}
+
+/* log */
+#log{height:300px;overflow-y:auto;background:#0B1929;border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;font-family:var(--mono);font-size:11.5px;line-height:1.65;}
+#log::-webkit-scrollbar{width:7px;} #log::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+.l{display:flex;gap:8px;margin-bottom:2px;}
+.l .t{color:#3E5C7E;flex:none;}
+.l.info .m{color:var(--text2);}
+.l.ok .m{color:#7BE0C2;}
+.l.warn .m{color:#F3C089;}
+.l.err .m{color:#F5A5A3;}
+.l.evt .m{color:#9EC7F2;}
+.l.barge .m{color:#fff;background:var(--coral);padding:0 6px;border-radius:4px;font-weight:700;}
+
+/* transcript */
+#tr{height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;}
+#tr::-webkit-scrollbar{width:7px;} #tr::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+.b{padding:7px 10px;border-radius:9px;font-size:12.5px;max-width:88%;}
+.b.ai{background:var(--surface2);color:var(--text1);align-self:flex-start;}
+.b.me{background:var(--teal-soft);color:#B9E6D4;align-self:flex-end;}
+.b .who{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);font-weight:700;display:block;margin-bottom:2px;}
+
+/* level meter */
+.meter{height:6px;background:var(--surface3);border-radius:4px;overflow:hidden;margin-top:6px;}
+.meter i{display:block;height:100%;width:0%;background:var(--teal2);transition:width .08s linear;}
+
+.note{font-size:11.5px;color:var(--text3);margin-top:8px;line-height:1.55;}
+.note b{color:#F3C089;}
+code{font-family:var(--mono);font-size:.9em;background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border2);color:#B9E6D4;}
+.tblwrap{max-height:200px;overflow-y:auto;}
+table{width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--mono);}
+th{text-align:left;color:var(--text3);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:5px 6px;border-bottom:1px solid var(--border);}
+td{padding:5px 6px;border-bottom:1px solid var(--border);color:var(--text2);}
+td.r{text-align:right;color:var(--text1);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="dot" id="dot"></div>
+  <div>
+    <h1>Live API 検証コンソール</h1>
+    <div class="sub">PHASE 0: 疎通・割り込み &middot; PHASE 1: コスト実測</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="hchip">経過 <b id="h-elapsed">0:00</b></div>
+  <div class="hchip">ターン <b id="h-turns">0</b></div>
+  <div class="hchip cost">実測 <b id="h-cost">$0.000000</b></div>
+</header>
+
+<div class="grid">
+
+  <!-- ================= LEFT ================= -->
+  <div>
+    <div class="card">
+      <h3><span class="n">01</span> 接続設定</h3>
+
+      <label>Gemini API キー（<code>lm_api_key</code> から自動読込）</label>
+      <input type="password" id="apikey" placeholder="AIza...">
+
+      <label>モデル ID <span style="text-transform:none;letter-spacing:0;font-weight:400;">— プレビューのため変動します</span></label>
+      <input type="text" id="model" value="gemini-2.5-flash-native-audio-preview-12-2025">
+
+      <div class="row">
+        <div>
+          <label>音声</label>
+          <select id="voice">
+            <option value="Puck">Puck（男性寄り）</option>
+            <option value="Kore" selected>Kore（女性寄り）</option>
+            <option value="Charon">Charon</option>
+            <option value="Fenrir">Fenrir</option>
+            <option value="Aoede">Aoede</option>
+          </select>
+        </div>
+        <div>
+          <label>realtimeInput 形式</label>
+          <select id="rtfmt">
+            <option value="audio" selected>audio（現行）</option>
+            <option value="mediaChunks">mediaChunks（旧）</option>
+          </select>
+        </div>
+      </div>
+
+      <label>system_instruction</label>
+      <textarea id="sysprompt" rows="4">You are a friendly English teacher for a Japanese learner. Speak naturally at a moderate pace. Keep your turns to 2-4 sentences so the learner has room to speak. If the learner's English is unclear or accented, infer their intent from context rather than asking them to repeat.</textarea>
+
+      <div class="row" style="margin-top:14px;">
+        <button id="btn-connect">接続してマイク開始</button>
+        <button id="btn-stop" class="danger" disabled>切断</button>
+      </div>
+
+      <label style="margin-top:12px;">マイク入力レベル</label>
+      <div class="meter"><i id="lvl"></i></div>
+
+      <div class="note">
+        <b>Phase 0 の合格基準：</b> AIが話している最中に声をかぶせて、<b>1秒以内に黙る</b>こと。
+        右の「割り込み検知」カウンターが増えれば成功です。<br>
+        <b>Phase 1 では最適化を入れずに素で測ります。</b>履歴のテキスト化・音量ゲートは入っていません。
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><span class="n">02</span> イベントログ</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <!-- ================= RIGHT ================= -->
+  <div>
+    <div class="card">
+      <h3><span class="n">03</span> 計測（Phase 1）</h3>
+      <div class="mgrid">
+        <div class="metric"><div class="k">音声入力</div><div class="v" id="m-ain">0</div><div class="u">tokens</div></div>
+        <div class="metric"><div class="k">テキスト入力</div><div class="v" id="m-tin">0</div><div class="u">tokens</div></div>
+        <div class="metric"><div class="k">音声出力</div><div class="v" id="m-aout">0</div><div class="u">tokens</div></div>
+      </div>
+      <div class="mgrid" style="margin-top:10px;">
+        <div class="metric"><div class="k">自分の発話</div><div class="v" id="m-uspk">0</div><div class="u">秒</div></div>
+        <div class="metric"><div class="k">AIの発話</div><div class="v" id="m-aspk">0</div><div class="u">秒</div></div>
+        <div class="metric warn"><div class="k">10分換算</div><div class="v" id="m-per10">$0.00</div><div class="u">試算値 $0.09</div></div>
+      </div>
+      <div class="barge" id="barge">
+        <div class="big" id="m-barge">0</div>
+        <div class="lbl">割り込み検知（barge-in）</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><span class="n">04</span> トランスクリプト</h3>
+      <div id="tr"></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="n">05</span> ターン別ログ &amp; エクスポート</h3>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>#</th><th>音声in</th><th>text-in</th><th>音声out</th><th class="r">累計 $</th></tr></thead>
+          <tbody id="turns"></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="ghost" id="btn-csv">CSV書き出し</button>
+        <button class="ghost" id="btn-reset">計測リセット</button>
+      </div>
+      <div class="note">
+        単価（USD / 1Mトークン）: 音声in <code>$3.00</code> / テキストin <code>$0.50</code> / 音声out <code>$12.00</code> / テキストout <code>$2.00</code>。
+        <b>Phase 1 実施時に必ず公式ページで最新値を確認してください。</b>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+/* ============================================================
+   English AI Teacher — Live API 検証ページ (Phase 0 / Phase 1)
+   - 現行 index.html には一切影響しない独立ページ
+   - lm_* キーは読み取り専用。書き込みは lmlive_* のみ
+   ============================================================ */
+
+const K = {
+  READ_APIKEY : 'lm_api_key',      // 読み取り専用（現行アプリの資産）
+  MODEL       : 'lmlive_model',
+  VOICE       : 'lmlive_voice',
+  SYS         : 'lmlive_sys',
+  METRICS     : 'lmlive_metrics',
+  PRICES      : 'lmlive_prices'
+};
+
+// 単価: USD / 1M tokens
+const DEFAULT_PRICES = { audioIn:3.00, textIn:0.50, audioOut:12.00, textOut:2.00 };
+let PRICES = (()=>{ try{ return JSON.parse(localStorage.getItem(K.PRICES)) || DEFAULT_PRICES; }
+                    catch(e){ return DEFAULT_PRICES; } })();
+
+const WS_HOST = 'wss://generativelanguage.googleapis.com';
+const WS_PATH = '/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
+const IN_RATE  = 16000;   // Live API 入力: 16bit PCM 16kHz mono LE
+const OUT_RATE = 24000;   // Live API 出力: 16bit PCM 24kHz LE
+const SEND_MS  = 120;     // 送出チャンク長
+
+/* ---------- state ---------- */
+let ws=null, micCtx=null, micNode=null, micStream=null, micSrc=null, analyser=null;
+let playCtx=null, playHead=0, playSources=[];
+let connected=false, setupDone=false;
+let t0=0, tickTimer=null, lvlTimer=null;
+let userSpeakMs=0, aiSpeakSamples=0;
+let turnIdx=0;
+let M = { audioIn:0, textIn:0, audioOut:0, textOut:0, barge:0, turns:[] };
+let curInTr='', curOutTr='';
+
+/* ============================================================
+   認証層 — ★ 公開版はここだけ差し替える ★
+   ============================================================ */
+async function getLiveAuth(){
+  // 【検証中】自分のAPIキーをそのまま使う
+  const k = document.getElementById('apikey').value.trim();
+  if(!k) throw new Error('APIキーが未設定です');
+  return { type:'apikey', value:k };
+
+  /* 【公開版】バックエンドでエフェメラルトークンを発行して受け取る
+     ※ live_connect_constraints を必ず設定すること（省略すると
+        クライアントが model / system_instruction / tools を差し替え可能になる）
+  const r = await fetch('/api/live-token', { method:'POST', credentials:'include' });
+  if(!r.ok) throw new Error('トークン取得に失敗しました');
+  const { token } = await r.json();
+  return { type:'ephemeral', value:token };
+  */
+}
+
+function buildWsUrl(auth){
+  // エフェメラルトークンは APIキーと同じ形で access_token/key として渡す
+  return `${WS_HOST}${WS_PATH}?key=${encodeURIComponent(auth.value)}`;
+}
+
+/* ============================================================
+   ログ
+   ============================================================ */
+const logEl = document.getElementById('log');
+function log(msg, cls='info'){
+  const d = new Date();
+  const t = `${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`;
+  const row = document.createElement('div');
+  row.className = 'l '+cls;
+  row.innerHTML = `<span class="t">${t}</span><span class="m"></span>`;
+  row.querySelector('.m').textContent = msg;
+  logEl.appendChild(row);
+  logEl.scrollTop = logEl.scrollHeight;
+  if(logEl.childElementCount > 400) logEl.removeChild(logEl.firstChild);
+}
+
+/* ============================================================
+   base64 <-> bytes
+   ============================================================ */
+function b64FromBytes(bytes){
+  let s=''; const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH) s += String.fromCharCode.apply(null, bytes.subarray(i,i+CH));
+  return btoa(s);
+}
+function bytesFromB64(b64){
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+  return out;
+}
+
+/* ============================================================
+   マイク: Float32 -> Int16 PCM 16kHz
+   ============================================================ */
+const WORKLET = `
+class PcmTap extends AudioWorkletProcessor {
+  constructor(){ super(); this.buf=[]; this.need=Math.round(sampleRate * ${SEND_MS} / 1000); }
+  process(inputs){
+    const ch = inputs[0] && inputs[0][0];
+    if(ch){
+      for(let i=0;i<ch.length;i++) this.buf.push(ch[i]);
+      while(this.buf.length >= this.need){
+        const seg = this.buf.splice(0, this.need);
+        const pcm = new Int16Array(seg.length);
+        let sum=0;
+        for(let i=0;i<seg.length;i++){
+          let s = Math.max(-1, Math.min(1, seg[i]));
+          pcm[i] = s < 0 ? s*0x8000 : s*0x7FFF;
+          sum += s*s;
+        }
+        this.port.postMessage({ pcm: pcm.buffer, rms: Math.sqrt(sum/seg.length) }, [pcm.buffer]);
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-tap', PcmTap);
+`;
+
+async function startMic(){
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true }
+  });
+  micCtx = new AudioContext({ sampleRate: IN_RATE });
+  if(micCtx.sampleRate !== IN_RATE){
+    log(`⚠ AudioContext が ${micCtx.sampleRate}Hz で開きました（16000希望）。ブラウザによっては認識に影響します。`,'warn');
+  }
+  const url = URL.createObjectURL(new Blob([WORKLET], {type:'application/javascript'}));
+  await micCtx.audioWorklet.addModule(url);
+  URL.revokeObjectURL(url);
+
+  micSrc  = micCtx.createMediaStreamSource(micStream);
+  micNode = new AudioWorkletNode(micCtx, 'pcm-tap');
+  micNode.port.onmessage = (e)=>{
+    const { pcm, rms } = e.data;
+    // レベル表示
+    document.getElementById('lvl').style.width = Math.min(100, rms*260)+'%';
+    // 発話秒数の計測（Phase 2 の音量ゲート効果を測るため。※送出は止めない）
+    if(rms > 0.02) userSpeakMs += SEND_MS;
+
+    if(ws && ws.readyState===WebSocket.OPEN && setupDone){
+      const b64 = b64FromBytes(new Uint8Array(pcm));
+      const fmt = document.getElementById('rtfmt').value;
+      const msg = (fmt==='audio')
+        ? { realtimeInput:{ audio:{ data:b64, mimeType:`audio/pcm;rate=${IN_RATE}` } } }
+        : { realtimeInput:{ mediaChunks:[{ data:b64, mimeType:`audio/pcm;rate=${IN_RATE}` }] } };
+      ws.send(JSON.stringify(msg));
+    }
+  };
+  micSrc.connect(micNode);
+  // 出力には繋がない（ハウリング防止）。Worklet は destination 未接続でも動く。
+  micNode.connect(micCtx.createGain());
+  log('🎤 マイク開始 ('+micCtx.sampleRate+'Hz)','ok');
+}
+
+function stopMic(){
+  try{ micNode && micNode.disconnect(); }catch(e){}
+  try{ micSrc && micSrc.disconnect(); }catch(e){}
+  try{ micStream && micStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  try{ micCtx && micCtx.close(); }catch(e){}
+  micNode=micSrc=micStream=micCtx=null;
+  document.getElementById('lvl').style.width='0%';
+}
+
+/* ============================================================
+   再生: 24kHz PCM をキューで連続再生
+   ============================================================ */
+function ensurePlayCtx(){
+  if(!playCtx || playCtx.state==='closed'){
+    playCtx = new AudioContext({ sampleRate: OUT_RATE });
+    playHead = playCtx.currentTime;
+  }
+  if(playCtx.state==='suspended') playCtx.resume();
+}
+
+function enqueueAudio(b64){
+  ensurePlayCtx();
+  const bytes = bytesFromB64(b64);
+  const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength/2);
+  const f32 = new Float32Array(i16.length);
+  for(let i=0;i<i16.length;i++) f32[i] = i16[i] / 0x8000;
+
+  aiSpeakSamples += i16.length;
+
+  const buf = playCtx.createBuffer(1, f32.length, OUT_RATE);
+  buf.copyToChannel(f32, 0);
+  const src = playCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(playCtx.destination);
+
+  const now = playCtx.currentTime;
+  if(playHead < now) playHead = now + 0.02;
+  src.start(playHead);
+  playHead += buf.duration;
+
+  playSources.push(src);
+  src.onended = ()=>{ playSources = playSources.filter(s=>s!==src); };
+}
+
+function flushAudio(){
+  // 割り込み時: 再生中・予約済みの音声を即座に破棄する
+  playSources.forEach(s=>{ try{ s.stop(); }catch(e){} });
+  playSources = [];
+  if(playCtx) playHead = playCtx.currentTime;
+}
+
+/* ============================================================
+   WebSocket
+   ============================================================ */
+async function connect(){
+  let auth;
+  try{ auth = await getLiveAuth(); }
+  catch(e){ log('✗ '+e.message,'err'); return; }
+
+  const model = document.getElementById('model').value.trim();
+  const voice = document.getElementById('voice').value;
+  const sys   = document.getElementById('sysprompt').value;
+
+  localStorage.setItem(K.MODEL, model);
+  localStorage.setItem(K.VOICE, voice);
+  localStorage.setItem(K.SYS, sys);
+
+  log('接続中… '+model,'info');
+  ws = new WebSocket(buildWsUrl(auth));
+  ws.binaryType = 'blob';
+
+  ws.onopen = ()=>{
+    log('WebSocket 接続確立','ok');
+    const setup = {
+      setup:{
+        model: model.startsWith('models/') ? model : 'models/'+model,
+        generationConfig:{
+          responseModalities:['AUDIO'],
+          speechConfig:{ voiceConfig:{ prebuiltVoiceConfig:{ voiceName: voice } } }
+        },
+        systemInstruction:{ parts:[{ text: sys }] },
+        inputAudioTranscription:{},   // ← Phase 2 の「履歴テキスト化」に必須
+        outputAudioTranscription:{}
+      }
+    };
+    ws.send(JSON.stringify(setup));
+    log('→ setup 送信','evt');
+  };
+
+  ws.onmessage = async (ev)=>{
+    let text;
+    if(ev.data instanceof Blob) text = await ev.data.text();
+    else text = ev.data;
+    let msg;
+    try{ msg = JSON.parse(text); }
+    catch(e){ log('✗ JSON parse 失敗','err'); return; }
+    handleServer(msg);
+  };
+
+  ws.onerror = ()=>{ log('✗ WebSocket エラー（キー・モデルIDを確認）','err'); };
+
+  ws.onclose = (e)=>{
+    log(`WebSocket 切断 code=${e.code} ${e.reason||''}`, e.code===1000?'info':'warn');
+    teardown();
+  };
+}
+
+function handleServer(msg){
+  // --- setup 完了 ---
+  if(msg.setupComplete){
+    setupDone = true;
+    connected = true;
+    document.getElementById('dot').classList.add('on');
+    document.getElementById('btn-connect').disabled = true;
+    document.getElementById('btn-stop').disabled = false;
+    log('✓ setupComplete — 話しかけてください','ok');
+    startMic().catch(e=>log('✗ マイク: '+e.message,'err'));
+    t0 = Date.now();
+    tickTimer = setInterval(tick, 500);
+    return;
+  }
+
+  // --- 使用量 ---
+  if(msg.usageMetadata) applyUsage(msg.usageMetadata);
+
+  // --- サーバー応答 ---
+  const sc = msg.serverContent;
+  if(sc){
+    // ★ 割り込み（barge-in）
+    if(sc.interrupted){
+      M.barge++;
+      flushAudio();
+      document.getElementById('m-barge').textContent = M.barge;
+      const b = document.getElementById('barge');
+      b.classList.add('flash');
+      setTimeout(()=>b.classList.remove('flash'), 400);
+      log('🔴 INTERRUPTED — AIの発話を中断し、再生キューを破棄','barge');
+    }
+
+    // 入力（自分）の書き起こし
+    if(sc.inputTranscription && sc.inputTranscription.text){
+      curInTr += sc.inputTranscription.text;
+    }
+    // 出力（AI）の書き起こし
+    if(sc.outputTranscription && sc.outputTranscription.text){
+      curOutTr += sc.outputTranscription.text;
+    }
+
+    // 音声チャンク
+    const parts = sc.modelTurn && sc.modelTurn.parts;
+    if(parts){
+      parts.forEach(p=>{
+        if(p.inlineData && p.inlineData.data) enqueueAudio(p.inlineData.data);
+        if(p.text) log('AI(text): '+p.text,'evt');
+      });
+    }
+
+    if(sc.generationComplete) log('generationComplete','evt');
+
+    if(sc.turnComplete){
+      turnIdx++;
+      document.getElementById('h-turns').textContent = turnIdx;
+      if(curInTr.trim())  addBubble('me', curInTr.trim());
+      if(curOutTr.trim()) addBubble('ai', curOutTr.trim());
+      curInTr=''; curOutTr='';
+      pushTurnRow();
+      log('— turnComplete —','info');
+    }
+  }
+
+  if(msg.goAway){
+    log('⚠ goAway: セッション終了予告 '+JSON.stringify(msg.goAway),'warn');
+  }
+  if(msg.error){
+    log('✗ '+JSON.stringify(msg.error),'err');
+  }
+}
+
+/* ============================================================
+   使用量 → コスト
+   ============================================================ */
+function applyUsage(u){
+  const inD  = u.promptTokensDetails   || [];
+  const outD = u.responseTokensDetails || u.candidatesTokensDetails || [];
+
+  let ai=0, ti=0, ao=0, to=0;
+  inD.forEach(d=>{
+    const m=(d.modality||'').toUpperCase(), n=d.tokenCount||0;
+    if(m==='AUDIO') ai+=n; else ti+=n;
+  });
+  outD.forEach(d=>{
+    const m=(d.modality||'').toUpperCase(), n=d.tokenCount||0;
+    if(m==='AUDIO') ao+=n; else to+=n;
+  });
+
+  // 内訳が来ない場合のフォールバック（全部音声とみなす＝上振れ側に倒す）
+  if(inD.length===0  && u.promptTokenCount)   ai = u.promptTokenCount;
+  if(outD.length===0 && (u.responseTokenCount||u.candidatesTokenCount))
+    ao = u.responseTokenCount || u.candidatesTokenCount;
+
+  M.audioIn+=ai; M.textIn+=ti; M.audioOut+=ao; M.textOut+=to;
+  render();
+}
+
+function totalCost(){
+  return M.audioIn /1e6*PRICES.audioIn
+       + M.textIn  /1e6*PRICES.textIn
+       + M.audioOut/1e6*PRICES.audioOut
+       + M.textOut /1e6*PRICES.textOut;
+}
+
+function render(){
+  document.getElementById('m-ain').textContent  = M.audioIn.toLocaleString();
+  document.getElementById('m-tin').textContent  = M.textIn.toLocaleString();
+  document.getElementById('m-aout').textContent = M.audioOut.toLocaleString();
+  const c = totalCost();
+  document.getElementById('h-cost').textContent = '$'+c.toFixed(6);
+
+  const el = Math.max(1, (Date.now()-t0)/1000);
+  const per10 = t0 ? c / el * 600 : 0;
+  const e = document.getElementById('m-per10');
+  e.textContent = '$'+per10.toFixed(3);
+  e.parentElement.className = 'metric ' + (per10<=0.10 ? 'hi' : per10<=0.15 ? 'warn' : 'warn');
+}
+
+function tick(){
+  const s = Math.floor((Date.now()-t0)/1000);
+  document.getElementById('h-elapsed').textContent =
+    `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+  document.getElementById('m-uspk').textContent = Math.round(userSpeakMs/1000);
+  document.getElementById('m-aspk').textContent = Math.round(aiSpeakSamples/OUT_RATE);
+  render();
+}
+
+function pushTurnRow(){
+  const c = totalCost();
+  M.turns.push({
+    n:turnIdx, audioIn:M.audioIn, textIn:M.textIn, audioOut:M.audioOut,
+    textOut:M.textOut, cost:c, elapsed:Math.floor((Date.now()-t0)/1000),
+    barge:M.barge, userSpeakSec:Math.round(userSpeakMs/1000),
+    aiSpeakSec:Math.round(aiSpeakSamples/OUT_RATE)
+  });
+  const tb = document.getElementById('turns');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${turnIdx}</td><td>${M.audioIn.toLocaleString()}</td>`+
+                 `<td>${M.textIn.toLocaleString()}</td><td>${M.audioOut.toLocaleString()}</td>`+
+                 `<td class="r">$${c.toFixed(5)}</td>`;
+  tb.appendChild(tr);
+  tb.parentElement.parentElement.scrollTop = 9e9;
+  try{ localStorage.setItem(K.METRICS, JSON.stringify(M.turns.slice(-500))); }catch(e){}
+}
+
+function addBubble(who, text){
+  const el = document.createElement('div');
+  el.className = 'b '+who;
+  el.innerHTML = `<span class="who">${who==='me'?'あなた':'AI'}</span>`;
+  el.appendChild(document.createTextNode(text));
+  document.getElementById('tr').appendChild(el);
+  const c = document.getElementById('tr');
+  c.scrollTop = c.scrollHeight;
+}
+
+/* ============================================================
+   終了・リセット・エクスポート
+   ============================================================ */
+function teardown(){
+  connected=false; setupDone=false;
+  clearInterval(tickTimer);
+  stopMic();
+  flushAudio();
+  document.getElementById('dot').classList.remove('on');
+  document.getElementById('btn-connect').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+}
+
+function disconnect(){
+  try{ ws && ws.close(1000,'user'); }catch(e){}
+  teardown();
+  const el = Math.max(1,(Date.now()-t0)/1000);
+  log(`■ セッション終了 — ${Math.round(el)}秒 / ${turnIdx}ターン / $${totalCost().toFixed(6)} / 10分換算 $${(totalCost()/el*600).toFixed(3)}`,'ok');
+}
+
+document.getElementById('btn-connect').onclick = ()=>{
+  document.getElementById('turns').innerHTML='';
+  document.getElementById('tr').innerHTML='';
+  M = { audioIn:0,textIn:0,audioOut:0,textOut:0,barge:0,turns:[] };
+  turnIdx=0; userSpeakMs=0; aiSpeakSamples=0; curInTr=''; curOutTr='';
+  document.getElementById('m-barge').textContent='0';
+  render();
+  connect();
+};
+document.getElementById('btn-stop').onclick = disconnect;
+document.getElementById('btn-reset').onclick = ()=>{
+  localStorage.removeItem(K.METRICS);
+  location.reload();
+};
+document.getElementById('btn-csv').onclick = ()=>{
+  const rows = [['turn','elapsed_sec','audio_in','text_in','audio_out','text_out','user_speak_sec','ai_speak_sec','barge_in','cost_usd']];
+  M.turns.forEach(t=>rows.push([t.n,t.elapsed,t.audioIn,t.textIn,t.audioOut,t.textOut,t.userSpeakSec,t.aiSpeakSec,t.barge,t.cost.toFixed(6)]));
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `live_metrics_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  a.click();
+};
+
+/* ---------- init ---------- */
+(function init(){
+  // lm_api_key は読み取りのみ（現行アプリのデータは書き換えない）
+  const k = localStorage.getItem(K.READ_APIKEY);
+  if(k){
+    try{ document.getElementById('apikey').value = JSON.parse(k); }
+    catch(e){ document.getElementById('apikey').value = k; }
+    log('✓ lm_api_key を読み込みました（読み取り専用）','ok');
+  }else{
+    log('lm_api_key が見つかりません。APIキーを入力してください。','warn');
+  }
+  const m = localStorage.getItem(K.MODEL); if(m) document.getElementById('model').value = m;
+  const v = localStorage.getItem(K.VOICE); if(v) document.getElementById('voice').value = v;
+  const s = localStorage.getItem(K.SYS);   if(s) document.getElementById('sysprompt').value = s;
+
+  log('Phase 0: AIが話している最中に声をかぶせて、割り込めるか確認してください。','info');
+})();
+</script>
+</body>
+</html>
