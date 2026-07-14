@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <!-- CSP: 単一HTMLのためinlineは許可するが、通信先(connect-src)をGemini APIのみに限定する。
      万一XSSが混入してもlocalStorage内のAPIキーを外部サーバーへ送信できないようにする多層防御。 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' blob:; worker-src blob:; child-src blob:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>English AI Teacher — Live</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
@@ -3319,6 +3319,26 @@ var curIn='', curOut='', lastUserText='', lastAiText='';
 var liveTok = { ai:0, ti:0, ao:0, to:0 };
 var sessTimer=null, warnTimer=null, gateUntil=0;
 var connecting=false;
+var micChunks=0, srvMsgs=0;
+
+// 通話画面に常時出す状態バナー。失敗がトーストで流れて見逃されるのを防ぐ
+function setStatus(kind, msg){
+  var el = document.getElementById('live-status');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'live-status';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:9999;'+
+      'font-size:11px;font-family:monospace;padding:5px 12px;border-radius:20px;'+
+      'border:1px solid var(--border2);background:var(--surface2);color:var(--text2);pointer-events:none;';
+    document.body.appendChild(el);
+  }
+  var c = {ok:'#12B890', warn:'#F59E0B', err:'#EF4444', info:'#5B7FA8'}[kind] || '#5B7FA8';
+  el.style.color = c; el.style.borderColor = c;
+  el.textContent = msg;
+  el.style.display = '';
+  console.log('[live]', msg);
+}
+function hideStatus(){ var el=document.getElementById('live-status'); if(el) el.style.display='none'; }
 
 function LSget(k,d){ try{ var v=JSON.parse(localStorage.getItem(k)); return v==null?d:v; }catch(e){ return d; } }
 
@@ -3351,38 +3371,72 @@ var WORKLET = "class P extends AudioWorkletProcessor{constructor(){super();this.
 function b64(bytes){ var s='',C=0x8000; for(var i=0;i<bytes.length;i+=C) s+=String.fromCharCode.apply(null,bytes.subarray(i,i+C)); return btoa(s); }
 function unb64(x){ var b=atob(x),o=new Uint8Array(b.length); for(var i=0;i<b.length;i++) o[i]=b.charCodeAt(i); return o; }
 
+// PCMチャンクの送出（Worklet / ScriptProcessor 共通）
+function onPcm(pcmBuf, rms){
+  var live = document.getElementById('speech-live');
+  if(live && !micMuted) live.textContent = rms > GATE_RMS ? '🎤 ●●●' : '🎤 …';
+  micChunks++;
+  if(micChunks === 1) setStatus('ok', '🎤 音声送信中');
+
+  if(micMuted || !ws || ws.readyState!==1 || !setupDone) return;
+
+  // ── コスト対策2: 音量ゲート。話していない区間は送らない ──
+  var now = Date.now();
+  if(rms > GATE_RMS) gateUntil = now + GATE_HANG_MS;
+  if(now > gateUntil) return;
+
+  ws.send(JSON.stringify({ realtimeInput:{ audio:{
+    data: b64(new Uint8Array(pcmBuf)),
+    mimeType: 'audio/pcm;rate=' + IN_RATE
+  }}}));
+}
+
 async function startMic(){
   micStream = await navigator.mediaDevices.getUserMedia({
     audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true }
   });
   micCtx = new AudioContext({ sampleRate: IN_RATE });
-  var url = URL.createObjectURL(new Blob([WORKLET],{type:'application/javascript'}));
-  await micCtx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
 
-  micSrc  = micCtx.createMediaStreamSource(micStream);
-  micNode = new AudioWorkletNode(micCtx,'p');
-  micNode.port.onmessage = function(e){
-    var rms = e.data.rms;
-    var live = document.getElementById('speech-live');
-    if(live && !micMuted) live.textContent = rms > GATE_RMS ? '🎤 ●●●' : '🎤 …';
+  var useWorklet = false;
+  try{
+    // AudioWorklet は blob: URL から読み込む。CSP が blob: を許可していないと失敗する
+    var url = URL.createObjectURL(new Blob([WORKLET],{type:'application/javascript'}));
+    await micCtx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    useWorklet = true;
+  }catch(e){
+    console.warn('[live] AudioWorklet 読み込み失敗 → ScriptProcessor にフォールバック:', e);
+  }
 
-    if(micMuted || !ws || ws.readyState!==1 || !setupDone) return;
+  micSrc = micCtx.createMediaStreamSource(micStream);
 
-    // ── コスト対策2: 音量ゲート。話していない区間は送らない ──
-    var now = Date.now();
-    if(rms > GATE_RMS) gateUntil = now + GATE_HANG_MS;
-    if(now > gateUntil) return;
+  if(useWorklet){
+    micNode = new AudioWorkletNode(micCtx,'p');
+    micNode.port.onmessage = function(e){ onPcm(e.data.pcm, e.data.rms); };
+  }else{
+    // ── フォールバック: ScriptProcessorNode（非推奨だが blob: 不要で確実に動く）──
+    var N = 2048;
+    micNode = micCtx.createScriptProcessor(N, 1, 1);
+    micNode.onaudioprocess = function(ev){
+      var ch = ev.inputBuffer.getChannelData(0);
+      var pcm = new Int16Array(ch.length), sum = 0;
+      for(var i=0;i<ch.length;i++){
+        var v = Math.max(-1, Math.min(1, ch[i]));
+        pcm[i] = v < 0 ? v*0x8000 : v*0x7FFF;
+        sum += v*v;
+      }
+      onPcm(pcm.buffer, Math.sqrt(sum/ch.length));
+    };
+  }
 
-    ws.send(JSON.stringify({ realtimeInput:{ audio:{
-      data: b64(new Uint8Array(e.data.pcm)),
-      mimeType: 'audio/pcm;rate=' + IN_RATE
-    }}}));
-  };
   micSrc.connect(micNode);
-  // destination まで到達しないと process() が回らないブラウザがあるため gain=0 の sink を挟む
+  // destination まで到達しないと処理が回らないブラウザがあるため gain=0 の sink を挟む
   micSink = micCtx.createGain(); micSink.gain.value = 0;
   micNode.connect(micSink); micSink.connect(micCtx.destination);
   if(micCtx.state==='suspended') await micCtx.resume();
+
+  console.log('[live] mic started:', micCtx.sampleRate+'Hz', useWorklet?'AudioWorklet':'ScriptProcessor(fallback)');
+  setStatus('warn', '🎤 マイク準備完了（話しかけてください）');
 }
 
 function stopMic(){
@@ -3441,10 +3495,12 @@ async function connectLive(){
   var voice = selectedChar && selectedChar.gender==='female'
             ? LSget(LK.VOICE_F, DEF_VOICE_F) : LSget(LK.VOICE_M, DEF_VOICE_M);
 
+  setStatus('info', '接続中… ' + model);
   ws = new WebSocket(WS_URL + '?key=' + encodeURIComponent(key));
   ws.binaryType = 'blob';
 
   ws.onopen = function(){
+    setStatus('info', 'WebSocket 確立 → setup 送信');
     ws.send(JSON.stringify({ setup:{
       model: model.indexOf('models/')===0 ? model : 'models/'+model,
       generationConfig:{
@@ -3462,10 +3518,13 @@ async function connectLive(){
     var m; try{ m = JSON.parse(txt); }catch(e){ return; }
     handleLive(m);
   };
-  ws.onerror = function(){ showToast('✗ 接続エラー（APIキー・モデルIDを確認）', 5000); };
+  ws.onerror = function(){ setStatus('err','✗ 接続エラー（APIキー / モデルIDを確認）'); };
   ws.onclose  = function(e){
     connecting=false; setupDone=false;
-    if(callStarted && e.code!==1000) showToast('接続が切れました (code '+e.code+')', 4000);
+    if(callStarted && e.code!==1000){
+      setStatus('err','✗ 切断 code='+e.code+' '+(e.reason||''));
+      showToast('接続が切れました (code '+e.code+')', 4000);
+    }
   };
 }
 
@@ -3473,10 +3532,15 @@ function handleLive(m){
   if(m.setupComplete){
     setupDone = true; connecting = false;
     ensurePlay();
-    startMic().catch(function(e){ showToast('✗ マイク: '+e.message, 5000); });
+    setStatus('warn','✓ setupComplete');
+    startMic().catch(function(e){
+      setStatus('err','✗ マイク: '+e.message);
+      showToast('✗ マイク: '+e.message, 6000);
+    });
     startSessionTimer();
     return;
   }
+  srvMsgs++;
   if(m.usageMetadata) trackLiveUsage(m.usageMetadata);
 
   var sc = m.serverContent;
@@ -3490,7 +3554,10 @@ function handleLive(m){
 
   if(sc.modelTurn && sc.modelTurn.parts){
     sc.modelTurn.parts.forEach(function(p){
-      if(p.inlineData && p.inlineData.data) playChunk(p.inlineData.data);
+      if(p.inlineData && p.inlineData.data){
+        if(playSrcs.length===0) setStatus('ok','🔊 AI発話中');
+        playChunk(p.inlineData.data);
+      }
     });
   }
 
@@ -3658,6 +3725,7 @@ window.startCall = function(){
   document.getElementById('ai-name-tag').textContent = selectedChar.name + ' — ' + selectedChar.title;
   chatHistory = []; sessionCorrections = [];
   liveTok = {ai:0,ti:0,ao:0,to:0};
+  micChunks = 0; srvMsgs = 0;
   document.getElementById('caption-body').innerHTML = '';
   setHintChips(['Hello! Nice to meet you!','My name is...','I like...',"I'm from Japan"]);
 
@@ -3671,6 +3739,7 @@ window.endCall = function(silent){
   if(silent !== true && !confirm('通話を終了しますか？')) return;
 
   clearSessionTimer();
+  hideStatus();
   try{ ws && ws.close(1000,'end'); }catch(e){}
   ws=null; setupDone=false; connecting=false;
   stopMic(); flushPlay();
