@@ -3325,6 +3325,7 @@ var connecting=false;
 var micChunks=0, srvMsgs=0;
 var speaking=false, preroll=[];   // 手動VAD用
 var finalizeTimer=null, reconnects=0, resuming=false;
+var HAS_JA = /[\u3040-\u30ff\u4e00-\u9faf]/;   // ひらがな/カタカナ/漢字
 
 function finalizeTurn(){
   var u = curIn.trim(), a = curOut.trim();
@@ -3332,10 +3333,17 @@ function finalizeTurn(){
   if(u && u.indexOf('[SYSTEM]') >= 0) u = '';        // 挨拶トリガーは表示しない
 
   if(u){
-    addCaption('me', u, null, null);
+    // 書き起こしが日本語で返ることがある（Live APIは話者言語を自動判定するため）。
+    // その場合は生テキストをEN欄に出さず、分析レーンが英語を返すまで待つ。
+    var jaRaw = HAS_JA.test(u);
+    addCaption('me', jaRaw ? '…' : u, null, null);
     var me = document.querySelectorAll('#caption-body .cap-entry.me');
     var last = me[me.length-1];
-    if(last){ last.setAttribute('data-await-jp','1'); last.setAttribute('data-original-text', u); }
+    if(last){
+      last.setAttribute('data-await-jp','1');
+      last.setAttribute('data-original-text', u);
+      if(jaRaw) last.setAttribute('data-ja-raw','1');
+    }
     lastUserText = u;
     chatHistory.push({role:'user', parts:[{text:u}]});
   }
@@ -3513,9 +3521,28 @@ function stopMic(){
 /* ==========================================================
    音声: 再生 (24kHz PCM)
    ========================================================== */
+var masterGain = null;
+
+function getVol(){ var v = LS.get(K.VOICE_VOLUME); return (v==null ? 1.0 : Math.max(0, Math.min(2, v))); }
+
 function ensurePlay(){
-  if(!playCtx || playCtx.state==='closed'){ playCtx = new AudioContext({sampleRate:OUT_RATE}); playHead = playCtx.currentTime; }
+  if(!playCtx || playCtx.state==='closed'){
+    playCtx = new AudioContext({sampleRate:OUT_RATE});
+    playHead = playCtx.currentTime;
+    masterGain = playCtx.createGain();
+    masterGain.gain.value = getVol();
+    masterGain.connect(playCtx.destination);
+  }
   if(playCtx.state==='suspended') playCtx.resume();
+}
+function setVol(v){
+  v = Math.max(0, Math.min(2, v));
+  LS.set(K.VOICE_VOLUME, v);
+  if(masterGain) masterGain.gain.value = v;
+  var lbl = document.getElementById('live-vol-val');
+  if(lbl) lbl.textContent = Math.round(v*100) + '%';
+  var btn = document.getElementById('btn-volume');
+  if(btn) btn.classList.toggle('on', v > 0);
 }
 function playChunk(data){
   ensurePlay();
@@ -3526,7 +3553,7 @@ function playChunk(data){
   var buf = playCtx.createBuffer(1, f32.length, OUT_RATE);
   buf.copyToChannel(f32,0);
   var s = playCtx.createBufferSource();
-  s.buffer = buf; s.connect(playCtx.destination);
+  s.buffer = buf; s.connect(masterGain || playCtx.destination);
   var now = playCtx.currentTime;
   if(playHead < now) playHead = now + 0.02;
   s.start(playHead); playHead += buf.duration;
@@ -3719,12 +3746,18 @@ async function analyzeTurn(userText, aiText){
     'Teacher replied: ' + JSON.stringify(aiText || ''),
     '',
     'Return this exact shape:',
-    '{"userJapanese":"","userEnglishCorrected":"","pronunciationTip":"","japanese":"","hints":["","",""],',
+    '{"userEnglish":"","userJapanese":"","userEnglishCorrected":"","pronunciationTip":"","japanese":"","hints":["","",""],',
     ' "extract":{"name":"","job":"","hobby":"","weakPoint":"","goal":"","estimatedLevel":"","misc":""}}',
     '',
+    'NOTE: the learner speaks English with a Japanese accent, so the speech-to-text above may have',
+    'been transcribed INTO JAPANESE by mistake, or the learner may have actually spoken Japanese.',
+    '',
+    '- userEnglish: what the learner ACTUALLY SAID, written in English.',
+    '  If the transcript is already English, repeat it verbatim.',
+    '  If the transcript is Japanese, write the English they were trying to say.',
     '- userJapanese: Japanese translation of what the learner said.',
-    '- userEnglishCorrected: a natural English version of the learner\'s sentence.',
-    '  If it is already natural, return the EXACT same string. Do not rewrite for style alone.',
+    '- userEnglishCorrected: a natural, correct English version of userEnglish.',
+    '  If userEnglish is already natural, return the EXACT same string. Do not rewrite for style alone.',
     '- pronunciationTip: short Japanese hint ONLY if a likely Japanese-accent error is visible. Else "".',
     '- japanese: Japanese translation of the teacher\'s reply.',
     '- hints: 3 short English phrases the learner could say next.',
@@ -3742,7 +3775,7 @@ async function analyzeTurn(userText, aiText){
     if(!raw) return;
     var j = JSON.parse(raw.replace(/```json|```/g,'').trim());
 
-    if(userText) fillUserFeedback(j.userJapanese, j.userEnglishCorrected, j.pronunciationTip);
+    if(userText) applyUserFeedback(j);
     if(aiText && j.japanese) updateLastAiCaption(aiText, j.japanese);
     if(j.hints && j.hints.length) setHintChips(j.hints.filter(Boolean));
     if(j.extract && window.autoLearnFromChat) window.autoLearnFromChat(j.extract);
@@ -3754,6 +3787,54 @@ async function analyzeTurn(userText, aiText){
     updateTokenCost(um.promptTokenCount||0, um.candidatesTokenCount||0, ANALYZE_MODEL);
   }catch(e){
     console.warn('[live] 分析レーン失敗:', e);   // 会話は止めない
+  }
+}
+
+// 自分の発話バブルを「英語 → 日本語訳」の形に整える。
+// 生の書き起こしが日本語だった場合は、分析レーンが返した英語を正としてEN欄に入れる。
+function applyUserFeedback(j){
+  var t = document.querySelector('#caption-body .cap-entry.me[data-await-jp="1"]');
+  if(!t) return;
+  t.removeAttribute('data-await-jp');
+
+  var raw    = t.getAttribute('data-original-text') || '';
+  var jaRaw  = t.getAttribute('data-ja-raw') === '1';
+  var spoken = (j.userEnglish || '').trim() || (jaRaw ? '' : raw);
+  var fixed  = (j.userEnglishCorrected || '').trim() || spoken;
+
+  var enEl = t.querySelector('.cap-en');
+  if(enEl && spoken){
+    var changed = fixed && fixed.toLowerCase().trim() !== spoken.toLowerCase().trim();
+    if(changed){
+      // 訂正あり: 差分ハイライト + 元の発言
+      enEl.innerHTML = '<span class="cap-corrected">' + diffHighlight(spoken, fixed) + '</span>' +
+        '<div class="cap-original">🔊 ' + (jaRaw ? '認識(日本語)' : '認識') + ': ' + escHtml(raw) + '</div>';
+      t.classList.add('cap-has-correction');
+      sessionCorrections.push({ original: spoken, corrected: fixed });
+    }else{
+      enEl.textContent = spoken;
+      if(jaRaw){
+        var o = document.createElement('div');
+        o.className = 'cap-original';
+        o.textContent = '🔊 認識(日本語): ' + raw;
+        enEl.appendChild(o);
+      }
+    }
+  }
+
+  // 日本語訳
+  if(j.userJapanese && !t.querySelector('.cap-jp')){
+    var d = document.createElement('div');
+    d.className = 'cap-jp' + (capJpEnabled ? ' show' : '');
+    d.textContent = j.userJapanese;
+    t.appendChild(d);
+  }
+  // 発音チップ
+  if(j.pronunciationTip && !t.querySelector('.cap-tip')){
+    var p = document.createElement('div');
+    p.className = 'cap-tip';
+    p.textContent = '💡 ' + j.pronunciationTip;
+    t.appendChild(p);
   }
 }
 
@@ -3834,6 +3915,7 @@ window.startCall = function(){
   // Live は常時聞いている方式。マイクはONで開始する
   micMuted = false; updateMicUI();
   speaking = false; preroll = []; gateUntil = 0;
+  ensurePlay(); setVol(getVol());
   showToast('接続中…（話しかけると始まります）', 3000);
   connectLive();
 };
@@ -3843,6 +3925,7 @@ window.endCall = function(silent){
 
   clearSessionTimer();
   hideStatus();
+  var vp = document.getElementById('live-vol-panel'); if(vp) vp.style.display='none';
   clearTimeout(finalizeTimer);
   callStarted = false;                       // ← 先に落とす（onclose の再接続を止める）
   try{ ws && ws.close(1000,'end'); }catch(e){}
@@ -3905,11 +3988,41 @@ window.sendMessage = async function(overrideText){
  'sendInitialGreeting','teacherProactiveMessage','resetReplyTimer','confirmAndSendRecognized'
 ].forEach(function(fn){ window[fn] = function(){}; });
 
-// TTS再生ボタンは Live では意味を持たないので、音量ミュートとして扱う
+// 🔊ボタン: アプリ内音量スライダーの開閉
+// ※ 端末側に「通話音量」が出るのは、マイク使用中にブラウザが通話モードへ切り替わるため。
+//    これはWebページから抑止できないので、アプリ内に独立した音量を持たせて、
+//    端末の通話音量に触らずに音の大きさを調整できるようにする。
 window.toggleVolume = function(){
-  var btn = document.getElementById('btn-volume');
-  var on = btn && btn.classList.toggle('on');
-  if(playCtx) { try{ playCtx[on ? 'resume' : 'suspend'](); }catch(e){} }
+  var p = document.getElementById('live-vol-panel');
+  if(!p){
+    p = document.createElement('div');
+    p.id = 'live-vol-panel';
+    p.style.cssText = 'position:fixed;right:14px;bottom:96px;z-index:10000;width:216px;'+
+      'background:var(--surface1);border:1px solid var(--border2);border-radius:12px;'+
+      'padding:12px 14px;box-shadow:0 12px 32px rgba(0,0,0,.45);';
+    p.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+
+        '<span style="font-size:12px;font-weight:600">🔊 先生の声の大きさ</span>'+
+        '<span id="live-vol-val" style="margin-left:auto;font-size:11px;color:var(--teal2);font-family:monospace">100%</span>'+
+      '</div>'+
+      '<input type="range" id="live-vol" min="0" max="200" step="5" style="width:100%">'+
+      '<div style="display:flex;gap:6px;margin-top:8px">'+
+        '<button id="live-vol-mute" style="flex:1;font-size:11px;padding:6px;border-radius:7px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer">ミュート</button>'+
+        '<button id="live-vol-100" style="flex:1;font-size:11px;padding:6px;border-radius:7px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer">100%</button>'+
+      '</div>'+
+      '<div style="font-size:10px;color:var(--text3);margin-top:8px;line-height:1.5">'+
+        '端末の「通話音量」は触らなくて構いません。ここだけで調整できます。</div>';
+    document.body.appendChild(p);
+
+    var r = p.querySelector('#live-vol');
+    r.value = Math.round(getVol()*100);
+    r.oninput = function(){ setVol(this.value/100); };
+    p.querySelector('#live-vol-mute').onclick = function(){ r.value=0;   setVol(0); };
+    p.querySelector('#live-vol-100').onclick  = function(){ r.value=100; setVol(1); };
+    setVol(getVol());
+    return;
+  }
+  p.style.display = (p.style.display === 'none') ? '' : 'none';
 };
 
 /* ==========================================================
