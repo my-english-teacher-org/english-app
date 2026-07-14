@@ -3294,7 +3294,8 @@ var LK = {
   VOICE_F : 'lmlive_voice_f',
   ANALYZE : 'lmlive_analyze',      // 分析レーンON/OFF
   LIMIT_MS: 'lmlive_session_ms',
-  VAD     : 'lmlive_vad'
+  VAD     : 'lmlive_vad',
+  SPEAKER : 'lmlive_speaker'      // スピーカー優先モード
 };
 var DEF_MODEL   = 'gemini-2.5-flash-native-audio-preview-12-2025';
 var DEF_VOICE_M = 'Puck';
@@ -3302,6 +3303,15 @@ var DEF_VOICE_F = 'Kore';
 var ANALYZE_MODEL = 'gemini-2.5-flash-lite';
 var SESSION_LIMIT_MS = 10 * 60 * 1000;   // 1レッスン10分
 var VAD_MODE = 'auto';   // 'auto'(安定・既定) / 'manual'(安いが実験的)
+
+// ── スピーカー優先モード ────────────────────────────────────
+// スマホのブラウザは、エコーキャンセレーション付きでマイクを掴むと「通話モード」に入り、
+// 音声を受話口／通話音量ストリームへ回す。setSinkId でも受話口↔スピーカーは切り替えられない
+// （スマホのブラウザは両者を別デバイスとして列挙しないため）。
+// 唯一実効性のある手段は EC を切って通話モードを抜けること。ただしAIの声をマイクが拾うので、
+// AI発話中はマイクを止める(半二重)。結果としてバージインは使えなくなる。
+var SPEAKER_MODE = false;
+var aiSpeaking = false;
 
 // USD / 1M tokens  ※Phase1実測時に公式ページで要確認
 var LIVE_PRICES = { audioIn: 3.00, textIn: 0.50, audioOut: 12.00, textOut: 2.00 };
@@ -3326,6 +3336,7 @@ var micChunks=0, srvMsgs=0;
 var speaking=false, preroll=[];   // 手動VAD用
 var finalizeTimer=null, reconnects=0, resuming=false;
 var HAS_JA = /[\u3040-\u30ff\u4e00-\u9faf]/;   // ひらがな/カタカナ/漢字
+var aiEndTimer = null;
 
 function finalizeTurn(){
   var u = curIn.trim(), a = curOut.trim();
@@ -3427,6 +3438,9 @@ function onPcm(pcmBuf, rms){
 
   if(micMuted || !ws || ws.readyState!==1 || !setupDone) return;
 
+  // スピーカー優先モードは EC が無いので、AI発話中に送るとAI自身の声を拾ってしまう
+  if(SPEAKER_MODE && aiSpeaking) return;
+
   var now = Date.now();
   var loud = rms > GATE_RMS;
 
@@ -3462,8 +3476,12 @@ function onPcm(pcmBuf, rms){
 }
 
 async function startMic(){
+  // スピーカー優先モードでは EC/NS/AGC を切る。これにより端末が「通話モード」を抜け、
+  // 多くの Android でメディア出力（＝スピーカー）に戻る。
   micStream = await navigator.mediaDevices.getUserMedia({
-    audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true }
+    audio: SPEAKER_MODE
+      ? { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+      : { channelCount:1, echoCancellation:true,  noiseSuppression:true,  autoGainControl:true }
   });
   micCtx = new AudioContext({ sampleRate: IN_RATE });
 
@@ -3532,9 +3550,23 @@ function ensurePlay(){
     masterGain = playCtx.createGain();
     masterGain.gain.value = getVol();
     masterGain.connect(playCtx.destination);
+    trySpeakerSink();
   }
   if(playCtx.state==='suspended') playCtx.resume();
 }
+// 出力デバイスの明示指定。デスクトップでは効くが、スマホでは受話口/スピーカーが
+// 別デバイスとして列挙されないため、ほぼ効かない（失敗しても無害なので試すだけ）。
+async function trySpeakerSink(){
+  if(!SPEAKER_MODE || !playCtx || !('setSinkId' in AudioContext.prototype)) return;
+  try{
+    var devs = await navigator.mediaDevices.enumerateDevices();
+    var outs = devs.filter(function(d){ return d.kind === 'audiooutput'; });
+    var spk = outs.filter(function(d){ return /speaker|スピーカー/i.test(d.label); })[0];
+    if(spk){ await playCtx.setSinkId(spk.deviceId); console.log('[live] setSinkId →', spk.label); }
+    else console.log('[live] スピーカーの出力デバイスが見つかりません（スマホでは通常こうなります）');
+  }catch(e){ console.log('[live] setSinkId 非対応:', e.message); }
+}
+
 function setVol(v){
   v = Math.max(0, Math.min(2, v));
   LS.set(K.VOICE_VOLUME, v);
@@ -3559,9 +3591,19 @@ function playChunk(data){
   s.start(playHead); playHead += buf.duration;
   playSrcs.push(s);
   setTalking(true);
+  aiSpeaking = true;
+  clearTimeout(aiEndTimer);
   s.onended = function(){
     playSrcs = playSrcs.filter(function(x){return x!==s;});
-    if(playSrcs.length===0){ setTalking(false); setStatus('ok','🎤 どうぞ話してください'); }
+    if(playSrcs.length===0){
+      setTalking(false);
+      // 残響をマイクが拾わないよう、少し置いてからマイクを再開する
+      clearTimeout(aiEndTimer);
+      aiEndTimer = setTimeout(function(){
+        aiSpeaking = false;
+        setStatus('ok','🎤 どうぞ話してください');
+      }, SPEAKER_MODE ? 450 : 0);
+    }
   };
 }
 function flushPlay(){
@@ -3569,6 +3611,8 @@ function flushPlay(){
   playSrcs = [];
   if(playCtx) playHead = playCtx.currentTime;
   setTalking(false);
+  clearTimeout(aiEndTimer);
+  aiSpeaking = false;
 }
 
 /* ==========================================================
@@ -3915,7 +3959,10 @@ window.startCall = function(){
   // Live は常時聞いている方式。マイクはONで開始する
   micMuted = false; updateMicUI();
   speaking = false; preroll = []; gateUntil = 0;
+  aiSpeaking = false;
+  SPEAKER_MODE = LSget(LK.SPEAKER, false) === true;
   ensurePlay(); setVol(getVol());
+  if(SPEAKER_MODE) showToast('🔈 スピーカー優先モード（割り込みは使えません）', 3500);
   showToast('接続中…（話しかけると始まります）', 3000);
   connectLive();
 };
@@ -4010,8 +4057,14 @@ window.toggleVolume = function(){
         '<button id="live-vol-mute" style="flex:1;font-size:11px;padding:6px;border-radius:7px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer">ミュート</button>'+
         '<button id="live-vol-100" style="flex:1;font-size:11px;padding:6px;border-radius:7px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer">100%</button>'+
       '</div>'+
-      '<div style="font-size:10px;color:var(--text3);margin-top:8px;line-height:1.5">'+
-        '端末の「通話音量」は触らなくて構いません。ここだけで調整できます。</div>';
+      '<div style="border-top:1px solid var(--border);margin:10px 0 8px"></div>'+
+      '<label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">'+
+        '<input type="checkbox" id="live-spk" style="width:auto">'+
+        '<span>🔈 スピーカー優先モード</span></label>'+
+      '<div style="font-size:10px;color:var(--text3);margin-top:6px;line-height:1.55">'+
+        'ONにすると受話口ではなくスピーカーから鳴りやすくなります。'+
+        'ただし<b style="color:#F3C089">AI発話中の割り込みができなくなります</b>。'+
+        '切り替えには通話のかけ直しが必要です。</div>';
     document.body.appendChild(p);
 
     var r = p.querySelector('#live-vol');
@@ -4019,6 +4072,16 @@ window.toggleVolume = function(){
     r.oninput = function(){ setVol(this.value/100); };
     p.querySelector('#live-vol-mute').onclick = function(){ r.value=0;   setVol(0); };
     p.querySelector('#live-vol-100').onclick  = function(){ r.value=100; setVol(1); };
+
+    var sp = p.querySelector('#live-spk');
+    sp.checked = LSget(LK.SPEAKER, false) === true;
+    sp.onchange = function(){
+      localStorage.setItem(LK.SPEAKER, JSON.stringify(sp.checked));
+      showToast(sp.checked
+        ? '🔈 スピーカー優先ON。通話をかけ直すと反映されます（割り込み不可）'
+        : '🎧 通常モード。通話をかけ直すと反映されます（割り込み可）', 4500);
+    };
+
     setVol(getVol());
     return;
   }
