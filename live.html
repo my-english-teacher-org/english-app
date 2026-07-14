@@ -177,8 +177,24 @@ td.r{text-align:right;color:var(--text1);}
         <button id="btn-stop" class="danger" disabled>切断</button>
       </div>
 
+      <label style="margin-top:14px;">🔧 切り分けテスト</label>
+      <div class="row">
+        <button class="ghost" id="btn-beep">① 再生テスト</button>
+        <button class="ghost" id="btn-text" disabled>② テキスト送信</button>
+      </div>
+      <div class="note" style="margin-top:6px;">
+        <b>①</b> ビープが鳴らない → <b>再生経路</b>の問題。<br>
+        <b>②</b> テキストでAIが喋る → 再生経路とWSは正常。<b>マイク送信</b>だけが問題。<br>
+        ②でも喋らない → <b>モデルID / setup</b> の問題。
+      </div>
+
       <label style="margin-top:12px;">マイク入力レベル</label>
       <div class="meter"><i id="lvl"></i></div>
+      <div class="mgrid" style="margin-top:10px;">
+        <div class="metric"><div class="k">送信チャンク</div><div class="v" id="m-sent">0</div><div class="u">count</div></div>
+        <div class="metric"><div class="k">送信量</div><div class="v" id="m-kb">0</div><div class="u">KB</div></div>
+        <div class="metric"><div class="k">受信メッセージ</div><div class="v" id="m-recv">0</div><div class="u">count</div></div>
+      </div>
 
       <div class="note">
         <b>Phase 0 の合格基準：</b> AIが話している最中に声をかぶせて、<b>1秒以内に黙る</b>こと。
@@ -188,7 +204,11 @@ td.r{text-align:right;color:var(--text1);}
     </div>
 
     <div class="card">
-      <h3><span class="n">02</span> イベントログ</h3>
+      <h3><span class="n">02</span> イベントログ
+        <label style="margin:0 0 0 auto;text-transform:none;letter-spacing:0;font-weight:600;color:var(--text2);font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer;">
+          <input type="checkbox" id="rawlog" style="width:auto;"> 生JSONを表示
+        </label>
+      </h3>
       <div id="log"></div>
     </div>
   </div>
@@ -277,6 +297,7 @@ let userSpeakMs=0, aiSpeakSamples=0;
 let turnIdx=0;
 let M = { audioIn:0, textIn:0, audioOut:0, textOut:0, barge:0, turns:[] };
 let curInTr='', curOutTr='';
+let sentChunks=0, sentBytes=0, recvMsgs=0, sinkGain=null, firstAudioLogged=false;
 
 /* ============================================================
    認証層 — ★ 公開版はここだけ差し替える ★
@@ -383,18 +404,33 @@ async function startMic(){
     if(rms > 0.02) userSpeakMs += SEND_MS;
 
     if(ws && ws.readyState===WebSocket.OPEN && setupDone){
-      const b64 = b64FromBytes(new Uint8Array(pcm));
+      const bytes = new Uint8Array(pcm);
+      const b64 = b64FromBytes(bytes);
       const fmt = document.getElementById('rtfmt').value;
       const msg = (fmt==='audio')
         ? { realtimeInput:{ audio:{ data:b64, mimeType:`audio/pcm;rate=${IN_RATE}` } } }
         : { realtimeInput:{ mediaChunks:[{ data:b64, mimeType:`audio/pcm;rate=${IN_RATE}` }] } };
       ws.send(JSON.stringify(msg));
+      sentChunks++; sentBytes += bytes.length;
+      document.getElementById('m-sent').textContent = sentChunks;
+      document.getElementById('m-kb').textContent = Math.round(sentBytes/1024);
+      if(sentChunks===1) log('→ 最初の音声チャンクを送信 (fmt='+fmt+', '+bytes.length+' bytes)','ok');
+      if(sentChunks===40 && recvMsgs<=1)
+        log('⚠ 音声を約5秒送っても応答がありません。realtimeInput 形式を切り替えて再接続してみてください。','warn');
+    }else if(!setupDone){
+      // setup 前は捨てる
     }
   };
   micSrc.connect(micNode);
-  // 出力には繋がない（ハウリング防止）。Worklet は destination 未接続でも動く。
-  micNode.connect(micCtx.createGain());
-  log('🎤 マイク開始 ('+micCtx.sampleRate+'Hz)','ok');
+  // ★重要: destination まで到達しないと process() が呼ばれないブラウザがある。
+  //         gain=0 の sink を挟んでハウリングを防ぎつつ、グラフを確実にレンダリングさせる。
+  sinkGain = micCtx.createGain();
+  sinkGain.gain.value = 0;
+  micNode.connect(sinkGain);
+  sinkGain.connect(micCtx.destination);
+
+  if(micCtx.state === 'suspended') await micCtx.resume();
+  log('🎤 マイク開始 ('+micCtx.sampleRate+'Hz, state='+micCtx.state+')','ok');
 }
 
 function stopMic(){
@@ -419,6 +455,12 @@ function ensurePlayCtx(){
 
 function enqueueAudio(b64){
   ensurePlayCtx();
+  if(!firstAudioLogged){
+    firstAudioLogged = true;
+    log('🔊 AI音声チャンクを初受信 (playCtx state='+playCtx.state+')','ok');
+    if(playCtx.state !== 'running')
+      log('⚠ playCtx が running ではありません。再生されない可能性があります。','warn');
+  }
   const bytes = bytesFromB64(b64);
   const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength/2);
   const f32 = new Float32Array(i16.length);
@@ -493,6 +535,13 @@ async function connect(){
     let msg;
     try{ msg = JSON.parse(text); }
     catch(e){ log('✗ JSON parse 失敗','err'); return; }
+    recvMsgs++;
+    document.getElementById('m-recv').textContent = recvMsgs;
+    if(document.getElementById('rawlog').checked){
+      log('← '+text.slice(0,300), 'evt');
+    }else if(recvMsgs<=3){
+      log('← keys: '+Object.keys(msg).join(', '), 'evt');
+    }
     handleServer(msg);
   };
 
@@ -513,6 +562,8 @@ function handleServer(msg){
     document.getElementById('btn-connect').disabled = true;
     document.getElementById('btn-stop').disabled = false;
     log('✓ setupComplete — 話しかけてください','ok');
+    document.getElementById('btn-text').disabled = false;
+    ensurePlayCtx();
     startMic().catch(e=>log('✗ マイク: '+e.message,'err'));
     t0 = Date.now();
     tickTimer = setInterval(tick, 500);
@@ -684,6 +735,10 @@ document.getElementById('btn-connect').onclick = ()=>{
   document.getElementById('tr').innerHTML='';
   M = { audioIn:0,textIn:0,audioOut:0,textOut:0,barge:0,turns:[] };
   turnIdx=0; userSpeakMs=0; aiSpeakSamples=0; curInTr=''; curOutTr='';
+  sentChunks=0; sentBytes=0; recvMsgs=0; firstAudioLogged=false;
+  document.getElementById('m-sent').textContent='0';
+  document.getElementById('m-kb').textContent='0';
+  document.getElementById('m-recv').textContent='0';
   document.getElementById('m-barge').textContent='0';
   render();
   connect();
@@ -701,6 +756,38 @@ document.getElementById('btn-csv').onclick = ()=>{
   a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download = `live_metrics_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
   a.click();
+};
+
+/* ============================================================
+   切り分けテスト
+   ============================================================ */
+// ① 再生経路テスト: ローカルでビープを鳴らす
+document.getElementById('btn-beep').onclick = ()=>{
+  ensurePlayCtx();
+  const n = OUT_RATE * 0.6;
+  const i16 = new Int16Array(n);
+  for(let i=0;i<n;i++){
+    const env = Math.min(1, i/1200, (n-i)/1200);
+    i16[i] = Math.sin(2*Math.PI*440*i/OUT_RATE) * 8000 * env;
+  }
+  const bytes = new Uint8Array(i16.buffer);
+  enqueueAudio(b64FromBytes(bytes));
+  log('① 再生テスト: 440Hz を 0.6秒。聞こえなければ再生経路の問題です。(state='+playCtx.state+')','warn');
+};
+
+// ② テキスト送信テスト: マイクを介さずにAIに喋らせる
+document.getElementById('btn-text').onclick = ()=>{
+  if(!ws || ws.readyState!==WebSocket.OPEN || !setupDone){ log('未接続です','err'); return; }
+  const t = prompt('AIに送るテキスト', 'Hello! Please introduce yourself in two sentences.');
+  if(!t) return;
+  ws.send(JSON.stringify({
+    clientContent:{
+      turns:[{ role:'user', parts:[{ text:t }] }],
+      turnComplete:true
+    }
+  }));
+  addBubble('me', t);
+  log('② テキスト送信: '+t,'ok');
 };
 
 /* ---------- init ---------- */
