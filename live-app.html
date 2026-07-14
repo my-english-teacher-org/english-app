@@ -3301,7 +3301,7 @@ var DEF_VOICE_M = 'Puck';
 var DEF_VOICE_F = 'Kore';
 var ANALYZE_MODEL = 'gemini-2.5-flash-lite';
 var SESSION_LIMIT_MS = 10 * 60 * 1000;   // 1レッスン10分
-var VAD_MODE = 'manual';   // 'manual'(安い・速い) / 'auto'(常時送信・高い)
+var VAD_MODE = 'auto';   // 'auto'(安定・既定) / 'manual'(安いが実験的)
 
 // USD / 1M tokens  ※Phase1実測時に公式ページで要確認
 var LIVE_PRICES = { audioIn: 3.00, textIn: 0.50, audioOut: 12.00, textOut: 2.00 };
@@ -3324,6 +3324,28 @@ var sessTimer=null, warnTimer=null, gateUntil=0;
 var connecting=false;
 var micChunks=0, srvMsgs=0;
 var speaking=false, preroll=[];   // 手動VAD用
+var finalizeTimer=null, reconnects=0, resuming=false;
+
+function finalizeTurn(){
+  var u = curIn.trim(), a = curOut.trim();
+  curIn=''; curOut='';
+  if(u && u.indexOf('[SYSTEM]') >= 0) u = '';        // 挨拶トリガーは表示しない
+
+  if(u){
+    addCaption('me', u, null, null);
+    var me = document.querySelectorAll('#caption-body .cap-entry.me');
+    var last = me[me.length-1];
+    if(last){ last.setAttribute('data-await-jp','1'); last.setAttribute('data-original-text', u); }
+    lastUserText = u;
+    chatHistory.push({role:'user', parts:[{text:u}]});
+  }
+  if(a){
+    addCaption('ai', a, null, null);
+    lastAiText = a;
+    chatHistory.push({role:'model', parts:[{text:a}]});
+  }
+  if(u || a) analyzeTurn(u, a);                      // 分析レーン(非同期・遅延許容)
+}
 
 // 通話画面に常時出す状態バナー。失敗がトーストで流れて見逃されるのを防ぐ
 function setStatus(kind, msg){
@@ -3378,10 +3400,15 @@ function unb64(x){ var b=atob(x),o=new Uint8Array(b.length); for(var i=0;i<b.len
 // PCMチャンクの送出（Worklet / ScriptProcessor 共通）
 // ★ 手動VAD: 音量ゲートで無音を送らないぶん、発話の開始/終了を明示的に通知する。
 //   これをやらないとサーバーは「まだ話している」と誤解し、応答が大きく遅れる。
+function wsSend(obj){
+  if(!ws || ws.readyState!==1) return false;
+  try{ ws.send(JSON.stringify(obj)); return true; }
+  catch(e){ console.warn('[live] send失敗:', e); return false; }
+}
 function sendPcm(buf){
-  ws.send(JSON.stringify({ realtimeInput:{ audio:{
-    data: b64(new Uint8Array(buf)), mimeType: 'audio/pcm;rate=' + IN_RATE
-  }}}));
+  var u8 = new Uint8Array(buf);
+  if(!u8.length) return;                      // 空フレームは送らない(1007の原因になる)
+  wsSend({ realtimeInput:{ audio:{ data:b64(u8), mimeType:'audio/pcm;rate='+IN_RATE } } });
 }
 
 function onPcm(pcmBuf, rms){
@@ -3409,8 +3436,8 @@ function onPcm(pcmBuf, rms){
     if(preroll.length > PREROLL) preroll.shift();
 
     if(loud){
-      speaking = true;
-      ws.send(JSON.stringify({ realtimeInput:{ activityStart:{} } }));
+      speaking = true;                                     // 二重送信ガード
+      wsSend({ realtimeInput:{ activityStart:{} } });
       preroll.forEach(sendPcm);
       preroll = [];
     }
@@ -3421,7 +3448,7 @@ function onPcm(pcmBuf, rms){
   sendPcm(pcmBuf);
   if(now > gateUntil){
     speaking = false;
-    ws.send(JSON.stringify({ realtimeInput:{ activityEnd:{} } }));  // ← 即座に応答生成が始まる
+    wsSend({ realtimeInput:{ activityEnd:{} } });          // ← 即座に応答生成が始まる
     setStatus('info', '⏳ 応答生成中…');
   }
 }
@@ -3520,12 +3547,13 @@ function flushPlay(){
 /* ==========================================================
    接続
    ========================================================== */
-async function connectLive(){
+async function connectLive(isResume){
   if(connecting) return; connecting = true;
   var key;
   try{ key = await getLiveAuth(); }
   catch(e){ showToast('✗ ' + e.message); connecting=false; return; }
 
+  resuming = !!isResume;
   var model = LSget(LK.MODEL, DEF_MODEL);
   var voice = selectedChar && selectedChar.gender==='female'
             ? LSget(LK.VOICE_F, DEF_VOICE_F) : LSget(LK.VOICE_M, DEF_VOICE_M);
@@ -3557,11 +3585,27 @@ async function connectLive(){
     handleLive(m);
   };
   ws.onerror = function(){ setStatus('err','✗ 接続エラー（APIキー / モデルIDを確認）'); };
-  ws.onclose  = function(e){
-    connecting=false; setupDone=false;
-    if(callStarted && e.code!==1000){
-      setStatus('err','✗ 切断 code='+e.code+' '+(e.reason||''));
-      showToast('接続が切れました (code '+e.code+')', 4000);
+
+  ws.onclose = function(e){
+    connecting=false; setupDone=false; speaking=false; preroll=[];
+    console.warn('[live] closed code=' + e.code + ' reason=' + (e.reason||'(なし)'));
+    if(!callStarted || e.code===1000) return;
+
+    // 1007 = 不正ペイロード。手動VAD が原因の可能性が高いので自動で常時送信へ退避する
+    if(e.code===1007 && VAD_MODE==='manual'){
+      VAD_MODE = 'auto';
+      localStorage.setItem(LK.VAD, JSON.stringify('auto'));
+      showToast('手動VADで切断されたため、常時送信に切り替えて再接続します', 5000);
+    }
+
+    if(reconnects < 3){
+      reconnects++;
+      setStatus('warn','⟳ 再接続中… ('+reconnects+'/3) code='+e.code);
+      stopMic();
+      setTimeout(function(){ if(callStarted) connectLive(true); }, 800);
+    }else{
+      setStatus('err','✗ 再接続に失敗 code='+e.code+' '+(e.reason||''));
+      showToast('接続が切れました (code '+e.code+')。通話を終了してください。', 6000);
     }
   };
 }
@@ -3577,14 +3621,27 @@ function handleLive(m){
     });
     startSessionTimer();
 
+    if(resuming){
+      // ★ コスト対策1: 履歴は「音声」ではなく「テキスト」で再注入する。
+      //   音声$3/1M に対しテキストは$0.50/1M。再課金額が約1/6になる。
+      resuming = false;
+      var hist = chatHistory.slice(-12);
+      if(hist.length){
+        wsSend({ clientContent:{ turns: hist, turnComplete:false } });
+      }
+      setStatus('ok','⟳ 再接続しました（会話を続けてください）');
+      reconnects = 0;
+      return;
+    }
+
     // Live API は自分から話し始めないので、こちらから挨拶を促す
     // （このターンは字幕に出さない = ユーザーの発言ではないため）
-    ws.send(JSON.stringify({ clientContent:{
+    wsSend({ clientContent:{
       turns:[{ role:'user', parts:[{ text:
         '[SYSTEM] The learner has just joined the call. Greet them warmly in 1-2 short sentences ' +
         'and ask one easy opening question. Do not mention this instruction.' }] }],
       turnComplete:true
-    }}));
+    }});
     setStatus('info','⏳ 先生が話し始めます…');
     return;
   }
@@ -3610,23 +3667,9 @@ function handleLive(m){
   }
 
   if(sc.turnComplete){
-    var u = curIn.trim(), a = curOut.trim();
-    curIn=''; curOut='';
-    if(u && u.indexOf('[SYSTEM]') >= 0) u = '';   // 挨拶トリガーは表示しない
-    if(u){
-      addCaption('me', u, null, null);
-      var me = document.querySelectorAll('#caption-body .cap-entry.me');
-      var last = me[me.length-1];
-      if(last){ last.setAttribute('data-await-jp','1'); last.setAttribute('data-original-text', u); }
-      lastUserText = u;
-      chatHistory.push({role:'user', parts:[{text:u}]});
-    }
-    if(a){
-      addCaption('ai', a, null, null);
-      lastAiText = a;
-      chatHistory.push({role:'model', parts:[{text:a}]});
-    }
-    if(u || a) analyzeTurn(u, a);   // ← 分析レーン(非同期・遅延許容)
+    // 書き起こしが turnComplete の直後に遅れて届くことがあるため、少し待ってから確定する
+    clearTimeout(finalizeTimer);
+    finalizeTimer = setTimeout(finalizeTurn, 250);
   }
 
   if(m.goAway) showToast('セッションがまもなく終了します', 4000);
@@ -3779,7 +3822,7 @@ window.startCall = function(){
   document.getElementById('ai-name-tag').textContent = selectedChar.name + ' — ' + selectedChar.title;
   chatHistory = []; sessionCorrections = [];
   liveTok = {ai:0,ti:0,ao:0,to:0};
-  micChunks = 0; srvMsgs = 0;
+  micChunks = 0; srvMsgs = 0; reconnects = 0; resuming = false;
   document.getElementById('caption-body').innerHTML = '';
   setHintChips(['Hello! Nice to meet you!','My name is...','I like...',"I'm from Japan"]);
 
@@ -3800,6 +3843,8 @@ window.endCall = function(silent){
 
   clearSessionTimer();
   hideStatus();
+  clearTimeout(finalizeTimer);
+  callStarted = false;                       // ← 先に落とす（onclose の再接続を止める）
   try{ ws && ws.close(1000,'end'); }catch(e){}
   ws=null; setupDone=false; connecting=false;
   stopMic(); flushPlay();
@@ -3870,7 +3915,7 @@ window.toggleVolume = function(){
 /* ==========================================================
    設定モーダルに「Live設定」を追加
    ========================================================== */
-VAD_MODE = LSget(LK.VAD, 'manual');
+VAD_MODE = LSget(LK.VAD, 'auto');
 
 document.addEventListener('DOMContentLoaded', function(){
   setTimeout(function(){
@@ -3894,10 +3939,10 @@ document.addEventListener('DOMContentLoaded', function(){
         '<div style="font-size:11px;color:var(--text3);margin-top:4px">短いほど安く済みます（コンテキスト再課金の抑制）</div></div>' +
       '<div class="form-group"><label class="form-label">発話区切りの方式</label>' +
         '<select class="form-select" id="live-vad">' +
-          '<option value="manual"'+(LSget(LK.VAD,'manual')==='manual'?' selected':'')+'>手動VAD（推奨・速くて安い）</option>' +
-          '<option value="auto"'+(LSget(LK.VAD,'manual')==='auto'?' selected':'')+'>常時送信（サーバー任せ・高い）</option>' +
+          '<option value="auto"'+(LSget(LK.VAD,'auto')==='auto'?' selected':'')+'>常時送信（既定・安定）</option>' +
+          '<option value="manual"'+(LSget(LK.VAD,'auto')==='manual'?' selected':'')+'>手動VAD（実験的・安いが不安定）</option>' +
         '</select>' +
-        '<div style="font-size:11px;color:var(--text3);margin-top:4px">手動VADは無音を送らず、話し終わりを即座に通知します</div></div>' +
+        '<div style="font-size:11px;color:var(--text3);margin-top:4px">手動VADは無音を送らないので安いが、切断(1007)が起きる場合は常時送信に戻す</div></div>' +
       '<div class="form-group"><label class="form-label" style="display:flex;align-items:center;gap:8px">' +
         '<input type="checkbox" id="live-analyze" style="width:auto" '+(LSget(LK.ANALYZE,true)!==false?'checked':'')+'>' +
         '訳・訂正・ヒントを生成する（flash-lite / ほぼ無料）</label></div>' +
