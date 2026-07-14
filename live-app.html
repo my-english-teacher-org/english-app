@@ -3293,13 +3293,15 @@ var LK = {
   VOICE_M : 'lmlive_voice_m',
   VOICE_F : 'lmlive_voice_f',
   ANALYZE : 'lmlive_analyze',      // 分析レーンON/OFF
-  LIMIT_MS: 'lmlive_session_ms'
+  LIMIT_MS: 'lmlive_session_ms',
+  VAD     : 'lmlive_vad'
 };
 var DEF_MODEL   = 'gemini-2.5-flash-native-audio-preview-12-2025';
 var DEF_VOICE_M = 'Puck';
 var DEF_VOICE_F = 'Kore';
 var ANALYZE_MODEL = 'gemini-2.5-flash-lite';
 var SESSION_LIMIT_MS = 10 * 60 * 1000;   // 1レッスン10分
+var VAD_MODE = 'manual';   // 'manual'(安い・速い) / 'auto'(常時送信・高い)
 
 // USD / 1M tokens  ※Phase1実測時に公式ページで要確認
 var LIVE_PRICES = { audioIn: 3.00, textIn: 0.50, audioOut: 12.00, textOut: 2.00 };
@@ -3309,7 +3311,8 @@ var WS_URL = 'wss://generativelanguage.googleapis.com/ws/' +
 
 var IN_RATE = 16000, OUT_RATE = 24000, SEND_MS = 120;
 var GATE_RMS = 0.015;        // 音量ゲートしきい値
-var GATE_HANG_MS = 700;      // 発話終了後もこれだけは送り続ける(語尾切れ防止)
+var GATE_HANG_MS = 550;      // 発話終了とみなすまでの無音時間
+var PREROLL = 3;             // 発話検知の直前チャンクも送る(語頭切れ防止)
 
 // ── 状態 ────────────────────────────────────────────────
 var ws=null, setupDone=false;
@@ -3320,6 +3323,7 @@ var liveTok = { ai:0, ti:0, ao:0, to:0 };
 var sessTimer=null, warnTimer=null, gateUntil=0;
 var connecting=false;
 var micChunks=0, srvMsgs=0;
+var speaking=false, preroll=[];   // 手動VAD用
 
 // 通話画面に常時出す状態バナー。失敗がトーストで流れて見逃されるのを防ぐ
 function setStatus(kind, msg){
@@ -3372,23 +3376,54 @@ function b64(bytes){ var s='',C=0x8000; for(var i=0;i<bytes.length;i+=C) s+=Stri
 function unb64(x){ var b=atob(x),o=new Uint8Array(b.length); for(var i=0;i<b.length;i++) o[i]=b.charCodeAt(i); return o; }
 
 // PCMチャンクの送出（Worklet / ScriptProcessor 共通）
+// ★ 手動VAD: 音量ゲートで無音を送らないぶん、発話の開始/終了を明示的に通知する。
+//   これをやらないとサーバーは「まだ話している」と誤解し、応答が大きく遅れる。
+function sendPcm(buf){
+  ws.send(JSON.stringify({ realtimeInput:{ audio:{
+    data: b64(new Uint8Array(buf)), mimeType: 'audio/pcm;rate=' + IN_RATE
+  }}}));
+}
+
 function onPcm(pcmBuf, rms){
   var live = document.getElementById('speech-live');
   if(live && !micMuted) live.textContent = rms > GATE_RMS ? '🎤 ●●●' : '🎤 …';
   micChunks++;
-  if(micChunks === 1) setStatus('ok', '🎤 音声送信中');
+  if(micChunks === 1) setStatus('ok', '🎤 マイク送信中');
 
   if(micMuted || !ws || ws.readyState!==1 || !setupDone) return;
 
-  // ── コスト対策2: 音量ゲート。話していない区間は送らない ──
   var now = Date.now();
-  if(rms > GATE_RMS) gateUntil = now + GATE_HANG_MS;
-  if(now > gateUntil) return;
+  var loud = rms > GATE_RMS;
 
-  ws.send(JSON.stringify({ realtimeInput:{ audio:{
-    data: b64(new Uint8Array(pcmBuf)),
-    mimeType: 'audio/pcm;rate=' + IN_RATE
-  }}}));
+  if(VAD_MODE !== 'manual'){
+    // 常時送信（サーバー自動VADに任せる）: 遅延最小・コスト高
+    sendPcm(pcmBuf);
+    return;
+  }
+
+  if(loud) gateUntil = now + GATE_HANG_MS;
+
+  if(!speaking){
+    // 無音中: 直前チャンクを少しだけ保持しておく（語頭切れ防止）
+    preroll.push(pcmBuf);
+    if(preroll.length > PREROLL) preroll.shift();
+
+    if(loud){
+      speaking = true;
+      ws.send(JSON.stringify({ realtimeInput:{ activityStart:{} } }));
+      preroll.forEach(sendPcm);
+      preroll = [];
+    }
+    return;
+  }
+
+  // 発話中
+  sendPcm(pcmBuf);
+  if(now > gateUntil){
+    speaking = false;
+    ws.send(JSON.stringify({ realtimeInput:{ activityEnd:{} } }));  // ← 即座に応答生成が始まる
+    setStatus('info', '⏳ 応答生成中…');
+  }
 }
 
 async function startMic(){
@@ -3472,7 +3507,7 @@ function playChunk(data){
   setTalking(true);
   s.onended = function(){
     playSrcs = playSrcs.filter(function(x){return x!==s;});
-    if(playSrcs.length===0) setTalking(false);
+    if(playSrcs.length===0){ setTalking(false); setStatus('ok','🎤 どうぞ話してください'); }
   };
 }
 function flushPlay(){
@@ -3509,7 +3544,10 @@ async function connectLive(){
       },
       systemInstruction:{ parts:[{ text: buildLivePrompt() }] },
       inputAudioTranscription:{},
-      outputAudioTranscription:{}
+      outputAudioTranscription:{},
+      realtimeInputConfig: (VAD_MODE === 'manual')
+        ? { automaticActivityDetection:{ disabled:true } }   // ← 手動VAD
+        : {}
     }}));
   };
 
@@ -3532,12 +3570,22 @@ function handleLive(m){
   if(m.setupComplete){
     setupDone = true; connecting = false;
     ensurePlay();
-    setStatus('warn','✓ setupComplete');
+    setStatus('warn','✓ 接続完了');
     startMic().catch(function(e){
       setStatus('err','✗ マイク: '+e.message);
       showToast('✗ マイク: '+e.message, 6000);
     });
     startSessionTimer();
+
+    // Live API は自分から話し始めないので、こちらから挨拶を促す
+    // （このターンは字幕に出さない = ユーザーの発言ではないため）
+    ws.send(JSON.stringify({ clientContent:{
+      turns:[{ role:'user', parts:[{ text:
+        '[SYSTEM] The learner has just joined the call. Greet them warmly in 1-2 short sentences ' +
+        'and ask one easy opening question. Do not mention this instruction.' }] }],
+      turnComplete:true
+    }}));
+    setStatus('info','⏳ 先生が話し始めます…');
     return;
   }
   srvMsgs++;
@@ -3564,6 +3612,7 @@ function handleLive(m){
   if(sc.turnComplete){
     var u = curIn.trim(), a = curOut.trim();
     curIn=''; curOut='';
+    if(u && u.indexOf('[SYSTEM]') >= 0) u = '';   // 挨拶トリガーは表示しない
     if(u){
       addCaption('me', u, null, null);
       var me = document.querySelectorAll('#caption-body .cap-entry.me');
@@ -3644,7 +3693,7 @@ async function analyzeTurn(userText, aiText){
       { method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':key},
         body: JSON.stringify({ contents:[{role:'user',parts:[{text:prompt}]}],
                                generationConfig:{ temperature:0.3, responseMimeType:'application/json' } }) });
-    if(!r.ok) return;
+    if(!r.ok){ console.warn('[live] 分析レーン HTTP', r.status, await r.text()); return; }
     var d = await r.json();
     var raw = d.candidates && d.candidates[0].content.parts[0].text;
     if(!raw) return;
@@ -3655,9 +3704,14 @@ async function analyzeTurn(userText, aiText){
     if(j.hints && j.hints.length) setHintChips(j.hints.filter(Boolean));
     if(j.extract && window.autoLearnFromChat) window.autoLearnFromChat(j.extract);
 
+    // 既に描画済みのJP字幕にも show を反映（トグル状態のズレ対策）
+    if(capJpEnabled) document.querySelectorAll('#caption-body .cap-jp').forEach(function(el){ el.classList.add('show'); });
+
     var um = d.usageMetadata || {};
     updateTokenCost(um.promptTokenCount||0, um.candidatesTokenCount||0, ANALYZE_MODEL);
-  }catch(e){ /* 分析の失敗は会話を止めない */ }
+  }catch(e){
+    console.warn('[live] 分析レーン失敗:', e);   // 会話は止めない
+  }
 }
 
 /* ==========================================================
@@ -3729,8 +3783,14 @@ window.startCall = function(){
   document.getElementById('caption-body').innerHTML = '';
   setHintChips(['Hello! Nice to meet you!','My name is...','I like...',"I'm from Japan"]);
 
+  // 日本語字幕はデフォルトON（分析レーンの結果が隠れてしまうのを防ぐ）
+  capJpEnabled = true;
+  var jpBtn = document.getElementById('toggle-jp');
+  if(jpBtn) jpBtn.classList.add('on');
+
   // Live は常時聞いている方式。マイクはONで開始する
   micMuted = false; updateMicUI();
+  speaking = false; preroll = []; gateUntil = 0;
   showToast('接続中…（話しかけると始まります）', 3000);
   connectLive();
 };
@@ -3810,6 +3870,8 @@ window.toggleVolume = function(){
 /* ==========================================================
    設定モーダルに「Live設定」を追加
    ========================================================== */
+VAD_MODE = LSget(LK.VAD, 'manual');
+
 document.addEventListener('DOMContentLoaded', function(){
   setTimeout(function(){
     var anchor = document.getElementById('set-api-key');
@@ -3830,6 +3892,12 @@ document.addEventListener('DOMContentLoaded', function(){
       '<div class="form-group"><label class="form-label">1レッスンの長さ（分）</label>' +
         '<input class="form-input" id="live-limit" type="number" min="1" max="15" value="'+Math.round(LSget(LK.LIMIT_MS,SESSION_LIMIT_MS)/60000)+'">' +
         '<div style="font-size:11px;color:var(--text3);margin-top:4px">短いほど安く済みます（コンテキスト再課金の抑制）</div></div>' +
+      '<div class="form-group"><label class="form-label">発話区切りの方式</label>' +
+        '<select class="form-select" id="live-vad">' +
+          '<option value="manual"'+(LSget(LK.VAD,'manual')==='manual'?' selected':'')+'>手動VAD（推奨・速くて安い）</option>' +
+          '<option value="auto"'+(LSget(LK.VAD,'manual')==='auto'?' selected':'')+'>常時送信（サーバー任せ・高い）</option>' +
+        '</select>' +
+        '<div style="font-size:11px;color:var(--text3);margin-top:4px">手動VADは無音を送らず、話し終わりを即座に通知します</div></div>' +
       '<div class="form-group"><label class="form-label" style="display:flex;align-items:center;gap:8px">' +
         '<input type="checkbox" id="live-analyze" style="width:auto" '+(LSget(LK.ANALYZE,true)!==false?'checked':'')+'>' +
         '訳・訂正・ヒントを生成する（flash-lite / ほぼ無料）</label></div>' +
@@ -3842,6 +3910,8 @@ document.addEventListener('DOMContentLoaded', function(){
       localStorage.setItem(LK.VOICE_F, JSON.stringify(document.getElementById('live-voice-f').value.trim()));
       localStorage.setItem(LK.LIMIT_MS,JSON.stringify(Math.max(1,+document.getElementById('live-limit').value)*60000));
       localStorage.setItem(LK.ANALYZE, JSON.stringify(document.getElementById('live-analyze').checked));
+      localStorage.setItem(LK.VAD,     JSON.stringify(document.getElementById('live-vad').value));
+      VAD_MODE = document.getElementById('live-vad').value;
       showToast('✓ Live設定を保存しました');
     };
   }, 300);
