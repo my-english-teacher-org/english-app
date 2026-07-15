@@ -1331,7 +1331,10 @@ window.autoLearnFromChat = function(extractedInfo) {
   const learned = LS.get(K.AUTO_LEARNED) || [];
   const entries = [];
 
-  if (extractedInfo.name && !profile.basic?.name || profile.basic?.name === 'あなた') {
+  // ★ && は || より強く結合するため、括弧が無いと
+  //   「(name && !既存) || (既存==='あなた')」となり、extractedInfo.name が空文字でも
+  //   既存名が'あなた'なら分岐に入って名前を空で上書きしてしまう。
+  if (extractedInfo.name && (!profile.basic?.name || profile.basic?.name === 'あなた')) {
     profile.basic = { ...profile.basic, name: extractedInfo.name };
     entries.push({ key:'name', val: extractedInfo.name, label:'名前' });
   }
@@ -3275,8 +3278,15 @@ function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(e
    画面・モーダル・プロファイル・訂正表示・コスト管理は元の資産をそのまま使う。
 
    ■ 2レーン構成
-     会話レーン : Live API (WSS/ネイティブ音声) — 低遅延・バージイン
+     会話レーン : Live API (WSS/ネイティブ音声) — 低遅延
      分析レーン : flash-lite (テキスト)         — 訳/訂正/ヒント/プロファイル抽出
+
+   ■ コスト設計（既定は安価な gate モード）
+     - マイク送信は「無音・AI発話中は送らない」gate が既定。入力課金が約1/3。
+       設定で「常時送信(always)」に変えるとサーバー自動VADでバージイン可（高コスト）。
+     - contextWindowCompression + sessionResumption で長時間セッションの入力累積と
+       再接続時の履歴再注入を抑える。
+     - コスト上限タイマーは通話開始時刻から計算し、再接続でリセットしない。
 
    ■ 組み込み済みのコスト対策
      1. AI発話の短文化 (system_instruction)   ← 出力音声$12/1M が最も高い
@@ -3302,7 +3312,15 @@ var DEF_VOICE_M = 'Puck';
 var DEF_VOICE_F = 'Kore';
 var ANALYZE_MODEL = 'gemini-2.5-flash-lite';
 var SESSION_LIMIT_MS = 10 * 60 * 1000;   // 1レッスン10分
-var VAD_MODE = 'auto';   // 'auto'(安定・既定) / 'manual'(安いが実験的)
+
+// VAD_MODE は「次の通話で使う設定値」。実際に通信で使うのは sessionVad（接続時に固定）。
+//   'gate'   … 無音を送らない（音量ゲート + activityStart/End）。入力コストが約1/3
+//   'always' … 常時送信（サーバー自動VADに任せる）。遅延最小・コスト高
+// ★ プロトコルモードは setup フレームで一度だけネゴシエートされる。通話中に VAD_MODE を
+//   書き換えると、サーバーの認識とクライアントの送信方式がズレて必ず 1007 で切断される。
+//   そのため onPcm / setup は必ず sessionVad を見ること（VAD_MODE を直接見ない）。
+var VAD_MODE  = 'gate';
+var sessionVad = 'always';   // 接続ごとに VAD_MODE から確定させる
 
 // ── スピーカー優先モード ────────────────────────────────────
 // スマホのブラウザは、エコーキャンセレーション付きでマイクを掴むと「通話モード」に入り、
@@ -3320,6 +3338,7 @@ var WS_URL = 'wss://generativelanguage.googleapis.com/ws/' +
              'google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
 var IN_RATE = 16000, OUT_RATE = 24000, SEND_MS = 120;
+var MIC_RATE = IN_RATE;   // 実際にブラウザが返したマイクのサンプルレート（申告用）
 var GATE_RMS = 0.015;        // 音量ゲートしきい値
 var GATE_HANG_MS = 550;      // 発話終了とみなすまでの無音時間
 var PREROLL = 3;             // 発話検知の直前チャンクも送る(語頭切れ防止)
@@ -3335,6 +3354,12 @@ var connecting=false;
 var micChunks=0, srvMsgs=0;
 var speaking=false, preroll=[];   // 手動VAD用
 var finalizeTimer=null, reconnects=0, resuming=false;
+var callStartedAt=0;      // レッスン開始時刻。再接続でリセットしない（コスト上限のため）
+var callEpoch=0;          // 通話ごとに増やす。古いタイマー/ソケットの取りこぼしを弾く
+var closingByUs=false;    // endCall 由来の close(1000) かどうか
+var sessionHandle=null;   // sessionResumption のハンドル
+var aiEndWatchdog=null;   // aiSpeaking の固着を防ぐ実時間ウォッチドッグ
+var reconnectHealTimer=null;  // 接続が60秒安定したら再接続カウンタを戻す
 var HAS_JA = /[\u3040-\u30ff\u4e00-\u9faf]/;   // ひらがな/カタカナ/漢字
 var aiEndTimer = null;
 
@@ -3427,7 +3452,22 @@ function wsSend(obj){
 function sendPcm(buf){
   var u8 = new Uint8Array(buf);
   if(!u8.length) return;                      // 空フレームは送らない(1007の原因になる)
-  wsSend({ realtimeInput:{ audio:{ data:b64(u8), mimeType:'audio/pcm;rate='+IN_RATE } } });
+  // 上りが詰まっているときは捨てる。溜め込むと遅延が伸びるだけで、課金だけが増える。
+  if(ws && ws.bufferedAmount > 512 * 1024) return;
+  wsSend({ realtimeInput:{ audio:{ data:b64(u8), mimeType:'audio/pcm;rate='+MIC_RATE } } });
+}
+
+// 開いている発話区間を必ず閉じる。
+// ★ これを呼ばずに送信を止めると、サーバーは「まだ話している」と思い込んだまま応答せず、
+//   次の activityStart で二重オープンになって 1007 で切断される。
+//   ミュート・AI発話・通話終了・切断など「送信をやめる全経路」から呼ぶこと。
+function closeActivity(){
+  if(speaking && sessionVad === 'gate' && ws && ws.readyState===1 && setupDone){
+    wsSend({ realtimeInput:{ activityEnd:{} } });
+  }
+  speaking = false;
+  preroll  = [];
+  gateUntil = 0;
 }
 
 function onPcm(pcmBuf, rms){
@@ -3436,15 +3476,16 @@ function onPcm(pcmBuf, rms){
   micChunks++;
   if(micChunks === 1) setStatus('ok', '🎤 マイク送信中');
 
-  if(micMuted || !ws || ws.readyState!==1 || !setupDone) return;
+  if(micMuted || !ws || ws.readyState!==1 || !setupDone){ closeActivity(); return; }
 
-  // スピーカー優先モードは EC が無いので、AI発話中に送るとAI自身の声を拾ってしまう
-  if(SPEAKER_MODE && aiSpeaking) return;
+  // スピーカー優先モードは EC が無いので、AI発話中に送るとAI自身の声を拾ってしまう。
+  // ゲートモードでは AI発話中はそもそも送らない（無駄な課金を避ける）。
+  if(aiSpeaking && (SPEAKER_MODE || sessionVad === 'gate')){ closeActivity(); return; }
 
   var now = Date.now();
   var loud = rms > GATE_RMS;
 
-  if(VAD_MODE !== 'manual'){
+  if(sessionVad !== 'gate'){
     // 常時送信（サーバー自動VADに任せる）: 遅延最小・コスト高
     sendPcm(pcmBuf);
     return;
@@ -3458,8 +3499,10 @@ function onPcm(pcmBuf, rms){
     if(preroll.length > PREROLL) preroll.shift();
 
     if(loud){
+      // activityStart が実際に送れたときだけ speaking を立てる。
+      // 送信失敗で speaking だけ立つと、サーバーに無い区間を閉じようとして壊れる。
+      if(!wsSend({ realtimeInput:{ activityStart:{} } })) return;
       speaking = true;                                     // 二重送信ガード
-      wsSend({ realtimeInput:{ activityStart:{} } });
       preroll.forEach(sendPcm);
       preroll = [];
     }
@@ -3476,6 +3519,10 @@ function onPcm(pcmBuf, rms){
 }
 
 async function startMic(){
+  // 再接続などで二重に呼ばれると、前の MediaStream / AudioContext / Worklet が解放されず、
+  // 2つのワークレットが同じ ws に PCM を送る（音声が二重課金され、状態も壊れる）。
+  if(micCtx || micStream) stopMic();
+
   // スピーカー優先モードでは EC/NS/AGC を切る。これにより端末が「通話モード」を抜け、
   // 多くの Android でメディア出力（＝スピーカー）に戻る。
   micStream = await navigator.mediaDevices.getUserMedia({
@@ -3483,7 +3530,20 @@ async function startMic(){
       ? { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false }
       : { channelCount:1, echoCancellation:true,  noiseSuppression:true,  autoGainControl:true }
   });
+  // getUserMedia の許可待ち（数秒〜）の間に通話が終わっていることがある。
+  // ここで掴んだマイクを即座に手放さないと、終了後も録音が続く。
+  if(!callStarted){ micStream.getTracks().forEach(function(t){t.stop();}); micStream=null; return; }
   micCtx = new AudioContext({ sampleRate: IN_RATE });
+
+  // ★ 要求したサンプルレートが通るとは限らない（Android WebView / 旧Safari は無視する）。
+  //   実際は48kHzなのに mimeType に rate=16000 と書いて送ると、サーバーは16kHzとして
+  //   デコードし、ピッチのずれた音声を聞くことになる（「AIが聞き取ってくれない」の正体）。
+  if(micCtx.sampleRate !== IN_RATE){
+    console.warn('[live] マイクのサンプルレートが ' + micCtx.sampleRate + 'Hz（要求は ' + IN_RATE + 'Hz）');
+    MIC_RATE = micCtx.sampleRate;   // 実レートを正しく申告する
+  }else{
+    MIC_RATE = IN_RATE;
+  }
 
   var useWorklet = false;
   try{
@@ -3595,24 +3655,57 @@ function playChunk(data){
   clearTimeout(aiEndTimer);
   s.onended = function(){
     playSrcs = playSrcs.filter(function(x){return x!==s;});
-    if(playSrcs.length===0){
-      setTalking(false);
-      // 残響をマイクが拾わないよう、少し置いてからマイクを再開する
-      clearTimeout(aiEndTimer);
-      aiEndTimer = setTimeout(function(){
-        aiSpeaking = false;
-        setStatus('ok','🎤 どうぞ話してください');
-      }, SPEAKER_MODE ? 450 : 0);
-    }
+    if(playSrcs.length===0) endAiSpeech();
   };
+  armAiWatchdog();
 }
+
+// AI発話の終了処理。onended からと、実時間ウォッチドッグからの両方で呼ばれる。
+function endAiSpeech(){
+  setTalking(false);
+  // 残響をマイクが拾わないよう、少し置いてからマイクを再開する
+  clearTimeout(aiEndTimer);
+  aiEndTimer = setTimeout(function(){
+    aiSpeaking = false;
+    if(callStarted) setStatus('ok','🎤 どうぞ話してください');
+  }, SPEAKER_MODE ? 450 : 0);
+}
+
+// ★ aiSpeaking は AudioBufferSourceNode.onended でしか下ろしていなかった。
+//   タブを裏に回すと playCtx が自動サスペンドされ、スケジュール済みの音源は
+//   onended に到達しない。すると aiSpeaking が true のまま固着し、onPcm のゲートで
+//   マイクが永久に止まる（画面上は「AI発話中」のまま、通話は生きているのに聞こえない）。
+//   再生予定の終端時刻から実時間タイマーを張って、確実に下ろす。
+function armAiWatchdog(){
+  clearTimeout(aiEndWatchdog);
+  if(!playCtx) return;
+  var msLeft = Math.max(0, (playHead - playCtx.currentTime) * 1000) + 1500;
+  aiEndWatchdog = setTimeout(function(){
+    if(!aiSpeaking) return;
+    console.warn('[live] AI発話の終了を検知できなかったため強制解除します');
+    playSrcs = [];
+    endAiSpeech();
+  }, msLeft);
+}
+
 function flushPlay(){
   playSrcs.forEach(function(s){ try{s.stop();}catch(e){} });
   playSrcs = [];
   if(playCtx) playHead = playCtx.currentTime;
   setTalking(false);
   clearTimeout(aiEndTimer);
+  clearTimeout(aiEndWatchdog);
   aiSpeaking = false;
+}
+
+// AudioContext は明示的に閉じないとページを閉じるまで生き続ける。
+// スマホでは出力が「通話モード」に張り付いたままになり、電池も食う。
+function closePlay(){
+  clearTimeout(aiEndWatchdog);
+  if(playCtx){
+    try{ playCtx.close(); }catch(e){}
+  }
+  playCtx = null; masterGain = null; playHead = 0;
 }
 
 /* ==========================================================
@@ -3623,6 +3716,11 @@ async function connectLive(isResume){
   var key;
   try{ key = await getLiveAuth(); }
   catch(e){ showToast('✗ ' + e.message); connecting=false; return; }
+
+  // ★ この接続で使うVADモードをここで確定させ、以後は変えない。
+  //   setup とデータ送信の方式が食い違うと 1007 で切断されるため。
+  sessionVad = (VAD_MODE === 'gate') ? 'gate' : 'always';
+  closingByUs = false;
 
   resuming = !!isResume;
   var model = LSget(LK.MODEL, DEF_MODEL);
@@ -3635,7 +3733,7 @@ async function connectLive(isResume){
 
   ws.onopen = function(){
     setStatus('info', 'WebSocket 確立 → setup 送信');
-    ws.send(JSON.stringify({ setup:{
+    var setup = {
       model: model.indexOf('models/')===0 ? model : 'models/'+model,
       generationConfig:{
         responseModalities:['AUDIO'],
@@ -3644,10 +3742,21 @@ async function connectLive(isResume){
       systemInstruction:{ parts:[{ text: buildLivePrompt() }] },
       inputAudioTranscription:{},
       outputAudioTranscription:{},
-      realtimeInputConfig: (VAD_MODE === 'manual')
-        ? { automaticActivityDetection:{ disabled:true } }   // ← 手動VAD
-        : {}
-    }}));
+      realtimeInputConfig: (sessionVad === 'gate')
+        ? { automaticActivityDetection:{ disabled:true } }   // ← 音量ゲート（こちらで発話区間を通知）
+        : {},
+
+      // ★ コスト対策: コンテキスト圧縮
+      //   これが無いと音声セッションは15分で強制終了し、会話が伸びるほど
+      //   ターンごとの入力トークンが増え続ける。スライディングウィンドウで頭打ちにする。
+      contextWindowCompression:{ slidingWindow:{} },
+
+      // ★ コスト対策: セッション再開
+      //   接続は約10分で切れる。ハンドルを渡して再開すれば、サーバー側が文脈を保持するので
+      //   「履歴12ターンをテキストで再注入」する必要がなくなる（再注入分の課金が消える）。
+      sessionResumption: sessionHandle ? { handle: sessionHandle } : {}
+    };
+    ws.send(JSON.stringify({ setup: setup }));
   };
 
   ws.onmessage = async function(ev){
@@ -3657,23 +3766,29 @@ async function connectLive(isResume){
   };
   ws.onerror = function(){ setStatus('err','✗ 接続エラー（APIキー / モデルIDを確認）'); };
 
-  ws.onclose = function(e){
-    connecting=false; setupDone=false; speaking=false; preroll=[];
-    console.warn('[live] closed code=' + e.code + ' reason=' + (e.reason||'(なし)'));
-    if(!callStarted || e.code===1000) return;
+  var epoch = callEpoch;   // この接続が属する通話。終了後に古い close が悪さをしないように。
 
-    // 1007 = 不正ペイロード。手動VAD が原因の可能性が高いので自動で常時送信へ退避する
-    if(e.code===1007 && VAD_MODE==='manual'){
-      VAD_MODE = 'auto';
-      localStorage.setItem(LK.VAD, JSON.stringify('auto'));
-      showToast('手動VADで切断されたため、常時送信に切り替えて再接続します', 5000);
-    }
+  ws.onclose = function(e){
+    connecting=false; setupDone=false; speaking=false; preroll=[]; gateUntil=0;
+    console.warn('[live] closed code=' + e.code + ' reason=' + (e.reason||'(なし)'));
+
+    // 再接続するかどうかに関わらず、マイクと再生キューは必ず落とす。
+    // ここを条件分岐の中に置くと、再接続を諦めたときにマイクが録り続ける。
+    stopMic();
+    flushPlay();   // 前セッションの残り音声が次の挨拶に被らないように
+
+    if(epoch !== callEpoch || !callStarted) return;      // 既に別の通話が始まっている
+    if(closingByUs) return;                              // endCall による正常終了
+
+    // サーバー都合の 1000（goAway 後など）はここに来る。無視するとマイクだけ生きた
+    // 「ゾンビ通話」になるため、通常の切断として扱って再接続する。
 
     if(reconnects < 3){
       reconnects++;
       setStatus('warn','⟳ 再接続中… ('+reconnects+'/3) code='+e.code);
-      stopMic();
-      setTimeout(function(){ if(callStarted) connectLive(true); }, 800);
+      setTimeout(function(){
+        if(callStarted && epoch === callEpoch) connectLive(true);
+      }, 800);
     }else{
       setStatus('err','✗ 再接続に失敗 code='+e.code+' '+(e.reason||''));
       showToast('接続が切れました (code '+e.code+')。通話を終了してください。', 6000);
@@ -3682,26 +3797,44 @@ async function connectLive(isResume){
 }
 
 function handleLive(m){
+  // セッション再開ハンドル。これがあれば再接続時に文脈がサーバー側で復元されるので、
+  // 履歴をテキストで再注入する必要がない（再注入ぶんの課金が消える）。
+  if(m.sessionResumptionUpdate){
+    if(m.sessionResumptionUpdate.resumable && m.sessionResumptionUpdate.newHandle){
+      sessionHandle = m.sessionResumptionUpdate.newHandle;
+    }
+    return;
+  }
+
   if(m.setupComplete){
     setupDone = true; connecting = false;
+    // 通話が既に終わっている（締切で endCall / ユーザー終了）のに、再接続ハンドシェイクの
+    // setupComplete が遅れて届くことがある。ここで弾かないとマイクが再起動し、
+    // コストタイマーも張り直されて「終わったはずの通話」が生き返る。
+    if(!callStarted){ try{ ws && ws.close(1000,'ended'); }catch(e){} return; }
     ensurePlay();
     setStatus('warn','✓ 接続完了');
     startMic().catch(function(e){
       setStatus('err','✗ マイク: '+e.message);
       showToast('✗ マイク: '+e.message, 6000);
     });
-    startSessionTimer();
+    startSessionTimer();   // 残り時間から張り直す（再接続でリセットされない）
 
     if(resuming){
-      // ★ コスト対策1: 履歴は「音声」ではなく「テキスト」で再注入する。
-      //   音声$3/1M に対しテキストは$0.50/1M。再課金額が約1/6になる。
       resuming = false;
-      var hist = chatHistory.slice(-12);
-      if(hist.length){
-        wsSend({ clientContent:{ turns: hist, turnComplete:false } });
+      // sessionResumption が効いていればサーバーが文脈を保持しているので再注入は不要。
+      // ハンドルが無い（初回や期限切れ）ときだけ、音声ではなくテキストで再注入する。
+      // 音声$3/1M に対しテキストは$0.50/1M。再課金額が約1/6で済む。
+      if(!sessionHandle){
+        var hist = chatHistory.slice(-12);
+        if(hist.length) wsSend({ clientContent:{ turns: hist, turnComplete:false } });
       }
       setStatus('ok','⟳ 再接続しました（会話を続けてください）');
-      reconnects = 0;
+      // ★ ここで reconnects=0 に戻すと、「接続→setup成功→即切断」を繰り返す障害
+      //   （quota切れ・1011 など）で無限に再接続し、そのたびにシステムプロンプトと
+      //   履歴を再課金し続ける。healthy な接続が続いたときだけ回復させる。
+      clearTimeout(reconnectHealTimer);
+      reconnectHealTimer = setTimeout(function(){ reconnects = 0; }, 60000);
       return;
     }
 
@@ -3815,14 +3948,26 @@ async function analyzeTurn(userText, aiText){
                                generationConfig:{ temperature:0.3, responseMimeType:'application/json' } }) });
     if(!r.ok){ console.warn('[live] 分析レーン HTTP', r.status, await r.text()); return; }
     var d = await r.json();
-    var raw = d.candidates && d.candidates[0].content.parts[0].text;
-    if(!raw) return;
+    // セーフティブロックや MAX_TOKENS では candidates に content が付かない。
+    // 素で辿ると TypeError になり、外側の catch に飲まれて訳も訂正も黙って出なくなる。
+    var cand  = (d.candidates && d.candidates[0]) || null;
+    var parts = (cand && cand.content && cand.content.parts) || [];
+    var raw   = parts[0] && parts[0].text;
+    if(!raw){
+      console.warn('[live] 分析レーン: 応答が空です', cand && cand.finishReason);
+      return;
+    }
     var j = JSON.parse(raw.replace(/```json|```/g,'').trim());
 
     if(userText) applyUserFeedback(j);
     if(aiText && j.japanese) updateLastAiCaption(aiText, j.japanese);
     if(j.hints && j.hints.length) setHintChips(j.hints.filter(Boolean));
-    if(j.extract && window.autoLearnFromChat) window.autoLearnFromChat(j.extract);
+    // extract は「未判明のフィールドは空文字で返す」仕様なので、全部空なのが通常。
+    // 中身があるときだけ学習させる（空で上書きしないため）。
+    if(j.extract && window.autoLearnFromChat &&
+       Object.keys(j.extract).some(function(k){ return j.extract[k]; })){
+      window.autoLearnFromChat(j.extract);
+    }
 
     // 既に描画済みのJP字幕にも show を反映（トグル状態のズレ対策）
     if(capJpEnabled) document.querySelectorAll('#caption-body .cap-jp').forEach(function(el){ el.classList.add('show'); });
@@ -3918,14 +4063,27 @@ function trackLiveUsage(u){
 /* ==========================================================
    セッション上限 (コスト対策3)
    ========================================================== */
+// ★ コスト上限。
+//   以前は setupComplete のたびに limit ぶん張り直していたため、Live API が仕様上
+//   約10分ごとに接続を切って自動再接続するたびにタイマーが0に戻り、上限が事実上
+//   機能していなかった（通話が青天井に延びうる）。
+//   通話開始時刻(callStartedAt)からの経過で「残り時間」を計算して張り直す。
 function startSessionTimer(){
   var limit = LSget(LK.LIMIT_MS, SESSION_LIMIT_MS);
   clearTimeout(warnTimer); clearTimeout(sessTimer);
-  warnTimer = setTimeout(function(){ showToast('あと1分でレッスン終了です', 5000); }, Math.max(0, limit-60000));
+  if(!callStartedAt) callStartedAt = Date.now();
+
+  var elapsed   = Date.now() - callStartedAt;
+  var remaining = limit - elapsed;
+  var mins      = Math.round(limit / 60000);
+
+  if(remaining <= 0){ endCall(true); return; }
+
+  warnTimer = setTimeout(function(){ showToast('あと1分でレッスン終了です', 5000); }, Math.max(0, remaining - 60000));
   sessTimer = setTimeout(function(){
-    showToast('レッスン10分が経過しました。お疲れさまでした！', 5000);
+    showToast('レッスン' + mins + '分が経過しました。お疲れさまでした！', 5000);
     endCall(true);
-  }, limit);
+  }, remaining);
 }
 function clearSessionTimer(){ clearTimeout(warnTimer); clearTimeout(sessTimer); warnTimer=sessTimer=null; }
 
@@ -3948,6 +4106,10 @@ window.startCall = function(){
   chatHistory = []; sessionCorrections = [];
   liveTok = {ai:0,ti:0,ao:0,to:0};
   micChunks = 0; srvMsgs = 0; reconnects = 0; resuming = false;
+  callEpoch++;                 // 前の通話の遅延タイマー/ソケットを無効化する
+  callStartedAt = Date.now();  // コスト上限の基準（再接続でリセットしない）
+  sessionHandle = null;
+  clearTimeout(reconnectHealTimer);
   document.getElementById('caption-body').innerHTML = '';
   setHintChips(['Hello! Nice to meet you!','My name is...','I like...',"I'm from Japan"]);
 
@@ -3974,10 +4136,17 @@ window.endCall = function(silent){
   hideStatus();
   var vp = document.getElementById('live-vol-panel'); if(vp) vp.style.display='none';
   clearTimeout(finalizeTimer);
+  clearTimeout(reconnectHealTimer);
+  clearTimeout(aiEndWatchdog);
   callStarted = false;                       // ← 先に落とす（onclose の再接続を止める）
+  callEpoch++;                               // 遅延して発火する再接続タイマーを無効化する
+  closeActivity();                           // 開いたままの発話区間を閉じてから切る
+  closingByUs = true;                        // onclose 側で「正常終了」と判別させる
   try{ ws && ws.close(1000,'end'); }catch(e){}
   ws=null; setupDone=false; connecting=false;
-  stopMic(); flushPlay();
+  callStartedAt = 0;
+  sessionHandle = null;
+  stopMic(); flushPlay(); closePlay();       // AudioContext も解放する（通話モード・電池対策）
 
   var excerpt = buildSessionExcerpt();
   if(excerpt){
@@ -4008,7 +4177,12 @@ window.endCall = function(silent){
 window.toggleMic = function(){
   micMuted = !micMuted;
   updateMicUI();
-  if(micMuted){ gateUntil = 0; showToast('ミュート中（AIには聞こえません）', 2000); }
+  if(micMuted){
+    // 発話の途中でミュートすると activityEnd が送られず、サーバーは「まだ話している」と
+    // 思い込んだまま応答しなくなる（通話は生きているのに反応しない）。必ず区間を閉じる。
+    closeActivity();
+    showToast('ミュート中（AIには聞こえません）', 2000);
+  }
 };
 
 // テキスト送信: clientContent で1ターン送る
@@ -4018,6 +4192,10 @@ window.sendMessage = async function(overrideText){
   if(!text || !callStarted) return;
   if(!ws || ws.readyState!==1 || !setupDone){ showToast('接続中です。少し待ってください'); return; }
   if(inp){ inp.value=''; autoResize(inp); }
+
+  // 音声の発話区間が開いたままテキストのターンを送ると、区間の中にターン境界が現れて
+  // サーバーがプロトコル違反とみなす（1007）。先に区間を閉じる。
+  closeActivity();
 
   addCaption('me', text, null, null);
   var me = document.querySelectorAll('#caption-body .cap-entry.me');
@@ -4091,7 +4269,13 @@ window.toggleVolume = function(){
 /* ==========================================================
    設定モーダルに「Live設定」を追加
    ========================================================== */
-VAD_MODE = LSget(LK.VAD, 'auto');
+// 旧値 'auto'/'manual' からの移行。既定は安価な 'gate'。
+(function(){
+  var v = LSget(LK.VAD, 'gate');
+  if(v === 'manual') v = 'gate';
+  else if(v === 'auto') v = 'always';
+  VAD_MODE = (v === 'always') ? 'always' : 'gate';
+})();
 
 document.addEventListener('DOMContentLoaded', function(){
   setTimeout(function(){
@@ -4113,12 +4297,12 @@ document.addEventListener('DOMContentLoaded', function(){
       '<div class="form-group"><label class="form-label">1レッスンの長さ（分）</label>' +
         '<input class="form-input" id="live-limit" type="number" min="1" max="15" value="'+Math.round(LSget(LK.LIMIT_MS,SESSION_LIMIT_MS)/60000)+'">' +
         '<div style="font-size:11px;color:var(--text3);margin-top:4px">短いほど安く済みます（コンテキスト再課金の抑制）</div></div>' +
-      '<div class="form-group"><label class="form-label">発話区切りの方式</label>' +
+      '<div class="form-group"><label class="form-label">マイク送信の方式</label>' +
         '<select class="form-select" id="live-vad">' +
-          '<option value="auto"'+(LSget(LK.VAD,'auto')==='auto'?' selected':'')+'>常時送信（既定・安定）</option>' +
-          '<option value="manual"'+(LSget(LK.VAD,'auto')==='manual'?' selected':'')+'>手動VAD（実験的・安いが不安定）</option>' +
+          '<option value="gate"'+(VAD_MODE==='gate'?' selected':'')+'>無音を送らない（既定・安い）</option>' +
+          '<option value="always"'+(VAD_MODE==='always'?' selected':'')+'>常時送信（応答が最速・高コスト）</option>' +
         '</select>' +
-        '<div style="font-size:11px;color:var(--text3);margin-top:4px">手動VADは無音を送らないので安いが、切断(1007)が起きる場合は常時送信に戻す</div></div>' +
+        '<div style="font-size:11px;color:var(--text3);margin-top:4px">無音とAI発話中を送らないため、音声入力の課金が約1/3になります。変更は次の通話から反映されます</div></div>' +
       '<div class="form-group"><label class="form-label" style="display:flex;align-items:center;gap:8px">' +
         '<input type="checkbox" id="live-analyze" style="width:auto" '+(LSget(LK.ANALYZE,true)!==false?'checked':'')+'>' +
         '訳・訂正・ヒントを生成する（flash-lite / ほぼ無料）</label></div>' +
@@ -4131,11 +4315,34 @@ document.addEventListener('DOMContentLoaded', function(){
       localStorage.setItem(LK.VOICE_F, JSON.stringify(document.getElementById('live-voice-f').value.trim()));
       localStorage.setItem(LK.LIMIT_MS,JSON.stringify(Math.max(1,+document.getElementById('live-limit').value)*60000));
       localStorage.setItem(LK.ANALYZE, JSON.stringify(document.getElementById('live-analyze').checked));
-      localStorage.setItem(LK.VAD,     JSON.stringify(document.getElementById('live-vad').value));
-      VAD_MODE = document.getElementById('live-vad').value;
-      showToast('✓ Live設定を保存しました');
+      var newVad = document.getElementById('live-vad').value === 'always' ? 'always' : 'gate';
+      localStorage.setItem(LK.VAD, JSON.stringify(newVad));
+      // ★ 通信方式は setup で一度だけ決まる。通話中に切り替えるとサーバーと食い違い、
+      //   必ず 1007 で切断される。VAD_MODE は「次の通話で使う値」に留める。
+      var changedDuringCall = callStarted && newVad !== sessionVad;
+      VAD_MODE = newVad;
+      showToast(changedDuringCall
+        ? '✓ 保存しました（マイク送信の方式は次の通話から反映されます）'
+        : '✓ Live設定を保存しました');
     };
   }, 300);
+});
+
+/* ==========================================================
+   ページ離脱時の後始末
+   ==========================================================
+   通話中にタブを閉じる／リロードすると、マイクとWebSocketが掴まれたままGC任せになる。
+   録音インジケータが残り、セッションもサーバー側で開いたまま（＝課金され続ける）になりうる。 */
+window.addEventListener('pagehide', function(){
+  if(!callStarted) return;
+  try{
+    closeActivity();
+    closingByUs = true;
+    callStarted = false;
+    if(ws) ws.close(1000,'pagehide');
+    stopMic();
+    closePlay();
+  }catch(e){}
 });
 
 })();
