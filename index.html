@@ -559,8 +559,10 @@ body{font-family:var(--font-b);background:var(--navy);color:var(--text);min-heig
       <div class="form-group">
         <label class="form-label">モデル</label>
         <select class="form-select" id="set-model">
-          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（最安・推奨）</option>
-          <option value="gemini-2.5-flash">gemini-2.5-flash（高品質）</option>
+          <option value="gemini-flash-lite-latest">gemini-flash-lite-latest（最安・推奨）</option>
+          <option value="gemini-flash-latest">gemini-flash-latest（高品質）</option>
+          <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+          <option value="gemini-3.5-flash">gemini-3.5-flash</option>
         </select>
       </div>
       <div class="form-group" id="monthly-group">
@@ -839,6 +841,19 @@ const K = {
   VOICE_VOLUME:'lm_voice_volume',
 };
 
+// 旧モデル(gemini-2.5-flash系)は新Googleアカウントでは404(新規ユーザー利用不可)になるため、
+// 保存済みのモデル選択を新モデルのエイリアスへ自動移行する（2026-08 アカウント移行対応）。
+(function migrateStoredModel(){
+  try {
+    var m = LS.get(K.MODEL);
+    var map = {
+      'gemini-2.5-flash-lite': 'gemini-flash-lite-latest',
+      'gemini-2.5-flash':      'gemini-flash-latest',
+    };
+    if (m && map[m]) LS.set(K.MODEL, map[m]);
+  } catch(e) {}
+})();
+
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
@@ -1081,7 +1096,7 @@ function onSpeedInput(el) {
 function loadSettings() {
   var key   = LS.get(K.API_KEY) || '';
   var tier  = LS.get(K.TIER) || 'paid';
-  var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+  var model = LS.get(K.MODEL) || 'gemini-flash-lite-latest';
   var limit = LS.get(K.MONTHLY_LIMIT) || 5;
   var spd   = LS.get(K.VOICE_SPEED) || 0.75;
   var keyEl = document.getElementById('set-api-key');
@@ -1128,7 +1143,7 @@ async function runConnectionTest() {
 
   // テスト3: 実際の生成エンドポイントへのPOST(アプリの本番経路と同一)
   try {
-    var r3 = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent', {
+    var r3 = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey || 'diagnostic' },
       body: JSON.stringify({ contents: [{ role:'user', parts:[{text:'Say OK'}] }], generationConfig: { maxOutputTokens: 5 } })
@@ -1873,6 +1888,13 @@ var recognition = null, micActive = false, micPermitted = null;
 var _replyTimer = null, _waitingReply = false;
 var REPLY_WAIT_MS = 35000;
 var MODEL_PRICES = {
+  // 新Googleアカウントで利用可能な現行モデル（USD / 100万トークン）
+  'gemini-flash-lite-latest': {input:0.10, output:0.40},
+  'gemini-flash-latest':      {input:0.30, output:2.50},
+  'gemini-3.5-flash-lite':    {input:0.10, output:0.40},
+  'gemini-3.5-flash':         {input:0.30, output:2.50},
+  'gemini-3.1-flash-lite':    {input:0.10, output:0.40},
+  // 旧モデル（既存の保存値・表示互換のため残置）
   'gemini-2.5-flash':      {input:0.15, output:0.60},
   'gemini-2.5-flash-lite': {input:0.10, output:0.40},
 };
@@ -2038,7 +2060,7 @@ async function sendInitialGreeting() {
       contents: [{ role:'user', parts:[{ text: openingInstruction }] }],
       generationConfig: { temperature: 0.9, maxOutputTokens: 350 }
     };
-    var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+    var model = LS.get(K.MODEL) || 'gemini-flash-lite-latest';
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
     var _ac1 = new AbortController(); var _t1 = setTimeout(function(){ _ac1.abort(); }, 30000);
     var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json', 'x-goog-api-key': apiKey}, body: JSON.stringify(body), signal: _ac1.signal });
@@ -2345,7 +2367,7 @@ async function streamGemini(model, apiKey, body, onEarlyEnglish) {
 async function callGeminiForChat(retryCount) {
   isLoading = true; document.getElementById('send-btn').disabled = true; showTypingInCaption();
   var apiKey = LS.get(K.API_KEY);
-  var model  = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+  var model  = LS.get(K.MODEL) || 'gemini-flash-lite-latest';
   var profile = LS.get(K.PROFILE) || {};
   var level   = LS.get(K.LEVEL)   || 'college';
   try {
@@ -2481,7 +2503,7 @@ async function teacherProactiveMessage() {
   _waitingReply = false; isLoading = true; document.getElementById('send-btn').disabled = true;
   showTypingInCaption();
   var apiKey = LS.get(K.API_KEY);
-  var model  = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+  var model  = LS.get(K.MODEL) || 'gemini-flash-lite-latest';
   var profile = LS.get(K.PROFILE) || {};
   var level   = LS.get(K.LEVEL)   || 'college';
   var hist = chatHistory.slice(-MAX_HISTORY_MSGS).concat([{role:'user', parts:[{text:'[System: waitingForReply: true. Gently follow up or change topic.]'}]}]);
@@ -2898,7 +2920,7 @@ async function transcribeWithGemini(blob, mime) {
     }
     var base64 = await blobToBase64(wavBlob);
     var sendMime = wavBlob.type || 'audio/wav';
-    var model = LS.get(K.MODEL) || 'gemini-2.5-flash-lite';
+    var model = LS.get(K.MODEL) || 'gemini-flash-lite-latest';
     var body = {
       contents: [{ role:'user', parts: [
         { text: 'Transcribe the spoken English in this audio exactly as said, as clean natural text. Do NOT repeat or duplicate any word or phrase — each word should appear only as many times as it was actually spoken. Output ONLY the transcription text, with no quotes, no labels, no extra words. If there is no clear speech, output the single word: (none)' },
@@ -3238,7 +3260,7 @@ function updateTokenCost(inTok, outTok, model) {
   LS.set(K.TOKENS_MONTHLY, {input: tmon.input + inTok, output: tmon.output + outTok});
   // 概算料金は、Tierに関わらず有料相当の単価で計算して表示する
   // (無料枠でも「有料ならいくらか」の目安が分かるようにするため)。
-  var prices = MODEL_PRICES[model] || MODEL_PRICES['gemini-2.5-flash-lite'];
+  var prices = MODEL_PRICES[model] || MODEL_PRICES['gemini-flash-lite-latest'];
   var cost   = (inTok / 1e6) * prices.input + (outTok / 1e6) * prices.output;
   LS.set(K.COST_TODAY,   (LS.get(K.COST_TODAY)   || 0) + cost);
   LS.set(K.COST_TOTAL,   (LS.get(K.COST_TOTAL)   || 0) + cost);
