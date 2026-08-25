@@ -1987,6 +1987,36 @@ function setTalking(active) {
   if (mouthEl) mouthEl.classList.toggle('talking', !!active);
 }
 
+// ── 画面スリープ防止(Screen Wake Lock) ──
+// 通話中は操作が無くても画面が消えないようにする。画面が消えるとマイク・音声認識・
+// 読み上げがまとめて止まり、会話が中断してしまうため。
+// 注意: wake lockはページが非表示になると自動解放されるので、復帰時に取り直す必要がある。
+var _wakeLock = null;
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return false;   // 非対応(iOS 16.4未満など)
+  if (_wakeLock) return true;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', function() { _wakeLock = null; });
+    sttDebug('[wakeLock] acquired');
+    return true;
+  } catch (e) {
+    // 低電力モード等でOSに拒否されることがある。通話自体は続行させる。
+    sttDebug('[wakeLock] request failed: ' + (e && e.message));
+    return false;
+  }
+}
+function releaseWakeLock() {
+  if (!_wakeLock) return;
+  try { _wakeLock.release(); } catch (e) {}
+  _wakeLock = null;
+  sttDebug('[wakeLock] released');
+}
+// 他アプリから戻ってきた時など、再表示されたら取り直す(通話中のみ)
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible' && callStarted && !_wakeLock) acquireWakeLock();
+});
+
 function startCall() {
   if (!selectedChar) return;
   var apiKey = LS.get(K.API_KEY);
@@ -2018,6 +2048,14 @@ function startCall() {
   }
 
   micMuted = true; _stallCount = 0; updateMicUI(); resetReplyTimer(); sendInitialGreeting();
+  // 通話中は画面を消さない。
+  // ★端末が非対応の場合のみ案内を出す。取得に失敗しただけ(タブが非表示・低電力モード等)の
+  //   ときは案内を出さない。visibilitychangeで取り直せるため、誤解を招く警告になってしまう。
+  if ('wakeLock' in navigator) {
+    acquireWakeLock();
+  } else {
+    showToast('この端末は画面スリープの自動防止に対応していません。端末の設定で「画面消灯／自動ロック」を長め(またはオフ)にしてください', 8000);
+  }
   // ★ recognitionはここでは起動しない。ユーザーが「マイクON」を押した時のみ起動する。
   //   （通話開始時に自動起動すると、ページごとに毎回許可ダイアログが出る原因になる）
 }
@@ -2161,7 +2199,7 @@ function endCall() {
     log = log.slice(0, 5); // 直近5件まで保持(肥大化防止)
     LS.set(K.SESSION_LOG, log);
   }
-  callStarted = false; stopRecognition();
+  callStarted = false; releaseWakeLock(); stopRecognition();
   stopVAD();
   stopGeminiRecording();
   // フィラータイマーと蓄積テキストをクリア
@@ -2484,6 +2522,9 @@ function explainApiError(msg) {
   }
   if (/quota|RESOURCE_EXHAUSTED|429/i.test(msg)) {
     return { en:'API quota exceeded. This may be a free tier limit.', jp:'APIの利用上限に達しました。無料Tierの制限の可能性があります。しばらく待つか、有料Tierへの切替をご検討ください。', short:'API利用上限に達しました（無料Tierの制限の可能性）' };
+  }
+  if (/invalid authentication credentials|UNAUTHENTICATED|401/i.test(msg)) {
+    return { en:'Invalid API key. Please set a new key in Settings.', jp:'APIキーが無効です（失効または削除された可能性があります）。設定タブで新しいキーを登録してください。', short:'APIキーが無効です（401）' };
   }
   if (/PERMISSION_DENIED|403/i.test(msg)) {
     return { en:'Permission denied. Check your API key permissions.', jp:'アクセス権限がありません。APIキーの権限設定を確認してください。', short:'アクセス権限エラー' };
