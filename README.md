@@ -4,8 +4,8 @@
 
 ## 公開URL
 
-設定後、Settings → Pages に表示されるURLに置き換えてください。
-（Organizationリポジトリの場合: `https://<org名>.github.io/<repo名>/`）
+- メインアプリ: https://my-english-teacher-org.github.io/english-app/
+- Live版: https://my-english-teacher-org.github.io/english-app/live-app.html
 
 ## 初回利用時の設定
 
